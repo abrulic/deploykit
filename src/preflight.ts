@@ -40,11 +40,11 @@ export async function preflight(cwd: string) {
   const hasNx = fileExists(join(cwd, "nx.json"));
   if (!hasTurbo && !hasNx) {
     errors.push(
-      "No monorepo tool found (looked for turbo.json / nx.json). deploykit v1 targets Turbo monorepos.",
+      "No monorepo tool found (looked for turbo.json / nx.json). deploykit supports Turbo and Nx monorepos.",
     );
   } else if (!hasTurbo && hasNx) {
     warnings.push(
-      "Detected an Nx monorepo. Detection works, but Dockerfile generation is Turbo-only in v1.",
+      "Detected an Nx monorepo. Nx Dockerfiles use standard conventions (dist/<projectRoot>); double-check the paths for Next/SSR apps before your first deploy.",
     );
   }
 

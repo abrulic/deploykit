@@ -1,10 +1,11 @@
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { Framework, MonorepoTool, PackageManager } from "./config.js";
 import { DEFAULT_PORTS } from "./config.js";
 import {
   expandWorkspaceGlob,
   fileExists,
+  findFilesByName,
   listDir,
   readJson,
   readText,
@@ -19,6 +20,13 @@ interface PackageJson {
   devDependencies?: Record<string, string>;
   engines?: { node?: string };
   packageManager?: string;
+}
+
+interface NxProjectJson {
+  name?: string;
+  projectType?: "application" | "library";
+  targets?: Record<string, { executor?: string }>;
+  implicitDependencies?: string[];
 }
 
 export interface DetectedApp {
@@ -53,6 +61,11 @@ export interface Detection {
   hasExistingWorkflows: boolean;
 }
 
+interface Projects {
+  apps: DetectedApp[];
+  libs: DetectedLib[];
+}
+
 interface RawPackage {
   name: string;
   dir: string;
@@ -77,6 +90,34 @@ export function detect(cwd: string) {
   const packageManager = detectPackageManager(cwd);
   const nodeVersion = detectNodeVersion(cwd);
 
+  const { apps, libs } = detectProjects({ cwd, tool });
+  apps.sort((a, b) => a.name.localeCompare(b.name));
+  libs.sort((a, b) => a.name.localeCompare(b.name));
+
+  const hasExistingWorkflows = listDir(join(cwd, ".github", "workflows")).some(
+    (f) => f.endsWith(".yml") || f.endsWith(".yaml"),
+  );
+
+  return { tool, packageManager, nodeVersion, apps, libs, hasExistingWorkflows };
+}
+
+function detectProjects({ cwd, tool }: { cwd: string; tool: MonorepoTool }): Projects {
+  if (tool === "nx") {
+    const nx = detectNxProjects({ cwd });
+    // Integrated Nx uses project.json; package-based Nx falls back to package.json.
+    if (nx.apps.length || nx.libs.length) return nx;
+  }
+  return detectPackageProjects({ cwd, tool });
+}
+
+// ── Package-based detection (Turbo, or Nx with per-package package.json) ──────
+function detectPackageProjects({
+  cwd,
+  tool,
+}: {
+  cwd: string;
+  tool: MonorepoTool;
+}): Projects {
   const dirs = new Set<string>();
   for (const pattern of workspaceGlobs(cwd)) {
     for (const dir of expandWorkspaceGlob({ root: cwd, pattern })) {
@@ -123,7 +164,7 @@ export function detect(cwd: string) {
         `${r.dir}/**`,
         ...depDirs.map((d) => `${d}/**`),
         "package.json",
-        "turbo.json",
+        `${tool}.json`,
       ],
       secrets: detectSecrets({ cwd, appDir: r.dir }),
       hasDockerfile: fileExists(join(cwd, r.dir, "Dockerfile")),
@@ -131,14 +172,79 @@ export function detect(cwd: string) {
     });
   }
 
-  apps.sort((a, b) => a.name.localeCompare(b.name));
-  libs.sort((a, b) => a.name.localeCompare(b.name));
+  return { apps, libs };
+}
 
-  const hasExistingWorkflows = listDir(join(cwd, ".github", "workflows")).some(
-    (f) => f.endsWith(".yml") || f.endsWith(".yaml"),
-  );
+// ── Nx detection (integrated repos, via project.json) ────────────────────────
+function detectNxProjects({ cwd }: { cwd: string }): Projects {
+  const projects = findFilesByName({ root: cwd, filename: "project.json", limit: 1000 })
+    .map((file) => {
+      const proj = readJson<NxProjectJson>(join(cwd, file));
+      if (!proj) return null;
+      const root = toPosix(dirname(file));
+      return { proj, root, name: proj.name ?? lastSegment(root) };
+    })
+    .filter((p): p is { proj: NxProjectJson; root: string; name: string } =>
+      p !== null,
+    );
 
-  return { tool, packageManager, nodeVersion, apps, libs, hasExistingWorkflows };
+  const rootByName = new Map(projects.map((p) => [p.name, p.root]));
+  const apps: DetectedApp[] = [];
+  const libs: DetectedLib[] = [];
+
+  for (const { proj, root, name } of projects) {
+    if (isNxLibrary({ proj, root })) {
+      libs.push({ name: lastSegment(root), root, packageName: name });
+      continue;
+    }
+
+    const framework = nxFramework(proj);
+    const internalDeps = proj.implicitDependencies ?? [];
+    const depDirs = internalDeps
+      .map((d) => rootByName.get(d))
+      .filter((d): d is string => Boolean(d));
+
+    apps.push({
+      name: lastSegment(root),
+      root,
+      packageName: name,
+      framework,
+      deployable: true,
+      port: DEFAULT_PORTS[framework],
+      internalDeps,
+      watchPaths: [
+        `${root}/**`,
+        ...depDirs.map((d) => `${d}/**`),
+        "package.json",
+        "nx.json",
+      ],
+      secrets: detectSecrets({ cwd, appDir: root }),
+      hasDockerfile: fileExists(join(cwd, root, "Dockerfile")),
+      hasFlyToml: fileExists(join(cwd, root, "fly.toml")),
+    });
+  }
+
+  return { apps, libs };
+}
+
+function isNxLibrary({ proj, root }: { proj: NxProjectJson; root: string }) {
+  if (proj.projectType === "library") return true;
+  if (proj.projectType === "application") return false;
+  // No explicit type — infer from conventional location.
+  return root.startsWith("libs/") || root.startsWith("packages/");
+}
+
+/** Infer an Nx application's framework from its build executor. */
+function nxFramework(proj: NxProjectJson): Framework {
+  const executors = Object.values(proj.targets ?? {})
+    .map((t) => t.executor ?? "")
+    .join(" ");
+  if (/next/.test(executors)) return "next";
+  if (/remix/.test(executors)) return "remix";
+  if (/astro/.test(executors)) return "astro";
+  if (/vite/.test(executors)) return "vite";
+  // webpack/esbuild/node/nest/rollup/tsc → a Node server bundle (the default).
+  return "node-server";
 }
 
 function readPackages({ cwd, dirs }: { cwd: string; dirs: Set<string> }) {

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { writeTree } from "../testing/fixtures.js";
 import {
   expandWorkspaceGlob,
+  findFilesByName,
   globToRegex,
   listDir,
   readJson,
@@ -102,6 +103,42 @@ describe("walkFilesByExt", () => {
       limit: 2,
     });
     expect(files.length).toBe(2);
+  });
+});
+
+describe("findFilesByName", () => {
+  let cleanup = () => {};
+  afterEach(() => cleanup());
+
+  it("finds all files with the exact name, skipping node_modules", () => {
+    const tree = writeTree({
+      files: {
+        "apps/web/project.json": "{}",
+        "apps/api/project.json": "{}",
+        "libs/ui/project.json": "{}",
+        "apps/web/other.json": "{}",
+        "node_modules/pkg/project.json": "{}",
+      },
+    });
+    cleanup = tree.cleanup;
+    const found = findFilesByName({
+      root: tree.root,
+      filename: "project.json",
+      limit: 100,
+    }).sort();
+    expect(found).toEqual([
+      "apps/api/project.json",
+      "apps/web/project.json",
+      "libs/ui/project.json",
+    ]);
+  });
+
+  it("returns [] when nothing matches", () => {
+    const tree = writeTree({ files: { "a.txt": "1" } });
+    cleanup = tree.cleanup;
+    expect(
+      findFilesByName({ root: tree.root, filename: "project.json", limit: 100 }),
+    ).toEqual([]);
   });
 });
 
