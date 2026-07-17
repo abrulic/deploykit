@@ -1,6 +1,6 @@
 # deploykit
 
-Automate CI/CD for **Turbo monorepos** deploying to **Fly.io**.
+Automate CI/CD for **Turbo and Nx monorepos** deploying to **Fly.io**.
 
 Run one command in your monorepo and get a reviewable PR that wires up:
 
@@ -18,7 +18,7 @@ npx deploykit init
 
 This runs five phases:
 
-1. **Preflight** — verifies you're in a git repo with a Turbo monorepo and that `gh` / `flyctl` are available.
+1. **Preflight** — verifies you're in a git repo with a Turbo or Nx monorepo and that `gh` / `flyctl` are available.
 2. **Detect** — reads your package manager, workspace packages, per-app framework, ports, internal dependencies and env-var names.
 3. **Ask** — a handful of questions, each pre-filled from detection (which apps, which environments, Fly org/region).
 4. **Plan** — shows exactly what will be written and provisioned; nothing happens until you confirm.
@@ -55,7 +55,8 @@ deploykit.config.ts             source of truth for every decision
 
 ## Scope (v1)
 
-- **Turbo** monorepos (Nx detection works; Dockerfile generation is Turbo-only for now).
+- **Turbo** monorepos — full support (`turbo prune` multi-stage builds).
+- **Nx** monorepos — supported via `nx build` + `dist/<projectRoot>` output. Node-server and static (Vite/Astro) apps are solid; Next/SSR Dockerfiles follow Nx conventions but are worth a glance before your first deploy.
 - **Fly.io** as the deploy target.
 - **No database provisioning** — databases are a separate concern; see the roadmap.
 

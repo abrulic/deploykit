@@ -144,4 +144,45 @@ export function listDir(path: string) {
   }
 }
 
+/**
+ * Collect workspace-relative paths of every file named exactly `filename`,
+ * skipping ignored dirs. Used to locate Nx `project.json` files.
+ */
+export function findFilesByName({
+  root,
+  filename,
+  limit,
+}: {
+  root: string;
+  filename: string;
+  limit: number;
+}) {
+  const out: string[] = [];
+  const walk = (abs: string, rel: string) => {
+    if (out.length >= limit) return;
+    let entries: string[];
+    try {
+      entries = readdirSync(abs);
+    } catch {
+      return;
+    }
+    for (const name of entries) {
+      if (out.length >= limit) return;
+      if (IGNORE_DIRS.has(name)) continue;
+      const childAbs = join(abs, name);
+      const childRel = rel ? `${rel}/${name}` : name;
+      let isDir = false;
+      try {
+        isDir = statSync(childAbs).isDirectory();
+      } catch {
+        continue;
+      }
+      if (isDir) walk(childAbs, childRel);
+      else if (name === filename) out.push(childRel);
+    }
+  };
+  walk(root, "");
+  return out;
+}
+
 export const toPosix = (path: string) => path.split("\\").join("/");

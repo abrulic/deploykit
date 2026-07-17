@@ -102,3 +102,66 @@ describe("detect", () => {
     expect(result.apps).toEqual([]);
   });
 });
+
+const NX_MONOREPO = {
+  "nx.json": "{}",
+  ".nvmrc": "20\n",
+  ".env.example": "SENTRY_DSN=\n",
+  "package.json": JSON.stringify({
+    name: "root",
+    packageManager: "pnpm@9.0.0",
+    devDependencies: { nx: "19", "@nx/next": "19", "@nx/esbuild": "19" },
+  }),
+  "apps/web/project.json": JSON.stringify({
+    name: "web",
+    projectType: "application",
+    targets: { build: { executor: "@nx/next:build" } },
+  }),
+  "apps/api/project.json": JSON.stringify({
+    name: "api",
+    projectType: "application",
+    targets: { build: { executor: "@nx/esbuild:esbuild" } },
+    implicitDependencies: ["shared"],
+  }),
+  "apps/api/src/main.ts": "const k = process.env.API_KEY;\n",
+  "libs/shared/project.json": JSON.stringify({
+    name: "shared",
+    projectType: "library",
+    targets: { build: { executor: "@nx/js:tsc" } },
+  }),
+};
+
+describe("detect (Nx)", () => {
+  let cleanup = () => {};
+  afterEach(() => cleanup());
+
+  it("detects Nx apps and libs via project.json", () => {
+    const tree = writeTree({ files: NX_MONOREPO });
+    cleanup = tree.cleanup;
+    const result = detect(tree.root);
+
+    expect(result.tool).toBe("nx");
+    expect(result.apps.map((a) => a.name)).toEqual(["api", "web"]);
+    expect(result.libs.map((l) => l.name)).toEqual(["shared"]);
+  });
+
+  it("infers framework from the build executor", () => {
+    const tree = writeTree({ files: NX_MONOREPO });
+    cleanup = tree.cleanup;
+    const { apps } = detect(tree.root);
+    expect(apps.find((a) => a.name === "web")?.framework).toBe("next");
+    expect(apps.find((a) => a.name === "api")?.framework).toBe("node-server");
+  });
+
+  it("uses the Nx project name and implicit deps", () => {
+    const tree = writeTree({ files: NX_MONOREPO });
+    cleanup = tree.cleanup;
+    const api = detect(tree.root).apps.find((a) => a.name === "api");
+    expect(api?.packageName).toBe("api"); // `nx build api`
+    expect(api?.internalDeps).toEqual(["shared"]);
+    expect(api?.watchPaths).toContain("libs/shared/**");
+    expect(api?.watchPaths).toContain("nx.json");
+    expect(api?.secrets).toContain("API_KEY");
+    expect(api?.secrets).toContain("SENTRY_DSN");
+  });
+});
