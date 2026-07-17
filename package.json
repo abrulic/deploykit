@@ -1,6 +1,9 @@
 {
-  "name": "deploykit",
+  "name": "@alminabrulic/deploykit",
   "version": "1.0.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Automate CI/CD for Turbo monorepos deploying to Fly.io — detect apps, generate Dockerfiles/workflows, wire up per-environment deploys.",
   "type": "module",
   "bin": {
