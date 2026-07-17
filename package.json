@@ -1,10 +1,10 @@
 {
   "name": "deploykit",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Automate CI/CD for Turbo monorepos deploying to Fly.io — detect apps, generate Dockerfiles/workflows, wire up per-environment deploys.",
   "type": "module",
   "bin": {
-    "deploykit": "./dist/index.js"
+    "deploykit": "dist/index.js"
   },
   "files": [
     "dist"
@@ -18,7 +18,8 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "ci",
@@ -29,6 +30,15 @@
     "deployment"
   ],
   "license": "BUSL-1.1",
+  "author": "Almina Brulic <contact@alminabrulic.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/abrulic/deploykit.git"
+  },
+  "homepage": "https://github.com/abrulic/deploykit#readme",
+  "bugs": {
+    "url": "https://github.com/abrulic/deploykit/issues"
+  },
   "dependencies": {
     "@clack/prompts": "^0.7.0",
     "picocolors": "^1.0.1",
