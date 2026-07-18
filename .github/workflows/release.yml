@@ -1,8 +1,22 @@
 name: Publish to npm
 
+# Releases:
+#  • Push to main            → automatic PATCH release.
+#  • Push with [minor]/[major] in the commit message → that bump instead of a
+#    patch (so an intentional minor/major doesn't ALSO ship a patch).
+#  • Push with [skip ci]     → no release (GitHub skips the run natively; this is
+#    also how the bot's own release commit avoids re-triggering itself).
+#  • Actions → Run workflow  → manual release with an exact version (e.g. 1.1.0)
+#    or a keyword (patch|minor|major|prerelease).
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Bump (patch | minor | major | prerelease) or an exact version like 1.1.0"
+        required: true
+        default: patch
 
 # Never let two publishes run at once.
 concurrency:
@@ -19,6 +33,29 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Decide version bump
+        id: bump
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT: ${{ inputs.version }}
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            V="$INPUT"
+          elif printf '%s' "$MSG" | grep -qiE '\[major\]'; then
+            V="major"
+          elif printf '%s' "$MSG" | grep -qiE '\[minor\]'; then
+            V="minor"
+          else
+            V="patch"
+          fi
+          if ! printf '%s' "$V" | grep -Eq '^(patch|minor|major|premajor|preminor|prepatch|prerelease|[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?)$'; then
+            echo "::error::Invalid version '$V'. Use patch | minor | major | prerelease, or an exact semver like 1.1.0."
+            exit 1
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Selected bump: $V"
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -33,9 +70,12 @@ jobs:
       - name: Bump version and publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ steps.bump.outputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          npm version patch -m "chore(release): v%s [skip ci]"
+          npm version "$VERSION" -m "chore(release): v%s [skip ci]"
           npm publish
           git push --follow-tags
+          NEW=$(node -p "require('./package.json').version")
+          echo "📦 Published **$NEW** to npm" >> "$GITHUB_STEP_SUMMARY"
