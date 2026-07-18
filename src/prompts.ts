@@ -2,12 +2,16 @@ import * as p from "@clack/prompts";
 import type {
   AppConfig,
   AppEnvironment,
+  CloudflareConfig,
   DeploykitConfig,
   EnvironmentKind,
 } from "./config.js";
 import type { DetectedApp, Detection } from "./detect.js";
 import { listFlyOrgs } from "./fly.js";
 import { pc } from "./util/log.js";
+
+/** Custom hostnames keyed by app name → environment. */
+type HostMap = Record<string, Partial<Record<EnvironmentKind, string>>>;
 
 export interface InitOptions {
   yes: boolean;
@@ -49,11 +53,14 @@ export async function buildConfig({
   detection,
   opts,
   flyReady = false,
+  cfReady = false,
 }: {
   detection: Detection;
   opts: InitOptions;
   /** Whether flyctl is authenticated — enables the org picker. */
   flyReady?: boolean;
+  /** Whether a CLOUDFLARE_API_TOKEN is present — enables custom-domain wiring. */
+  cfReady?: boolean;
 }) {
   const deployable = detection.apps.filter((a) => a.deployable);
 
@@ -68,9 +75,19 @@ export async function buildConfig({
   const provider = await pickProvider(opts, flyReady);
   if (!provider) return cancel();
 
+  const cf = await pickCloudflare({ apps: chosenApps, envs, cfReady });
+  if (!cf) return cancel();
+
   noteSecrets(chosenApps);
 
-  return assemble({ detection, apps: chosenApps, envs, provider });
+  return assemble({
+    detection,
+    apps: chosenApps,
+    envs,
+    provider,
+    cloudflare: cf.cloudflare,
+    hostnames: cf.hostnames,
+  });
 }
 
 function buildFromDefaults({
@@ -175,6 +192,72 @@ async function typeOrg(opts: InitOptions): Promise<string | null> {
   return p.isCancel(org) ? null : org.trim();
 }
 
+/**
+ * Ask whether to wire custom domains through Cloudflare, and if so collect the
+ * zone + a hostname per staging/production environment. Returns `{ hostnames }`
+ * with no `cloudflare` when the user declines, or null on cancel.
+ */
+async function pickCloudflare({
+  apps,
+  envs,
+  cfReady,
+}: {
+  apps: DetectedApp[];
+  envs: EnvironmentKind[];
+  cfReady: boolean;
+}): Promise<{ cloudflare?: CloudflareConfig; hostnames: HostMap } | null> {
+  // Only staging/production get custom domains — previews stay on *.fly.dev.
+  const domainKinds = (["staging", "production"] as const).filter((k) => envs.includes(k));
+  if (domainKinds.length === 0) return { hostnames: {} };
+
+  const enable = await p.confirm({
+    message: "Wire up custom domains through Cloudflare?",
+    initialValue: false,
+  });
+  if (p.isCancel(enable)) return null;
+  if (!enable) return { hostnames: {} };
+
+  if (!cfReady) {
+    p.log.warn(
+      "CLOUDFLARE_API_TOKEN isn't set — deploykit will record the domains in the config, but you'll need the token exported to actually provision them.",
+    );
+  }
+
+  const zoneInput = await p.text({
+    message: "Cloudflare zone (root domain)",
+    placeholder: "example.com",
+    validate: (v) => (v.trim() ? undefined : "Required"),
+  });
+  if (p.isCancel(zoneInput)) return null;
+  const zone = zoneInput.trim();
+
+  const hostnames: HostMap = {};
+  for (const app of apps) {
+    for (const kind of domainKinds) {
+      const suggestion = kind === "production" ? zone : `${kind}.${zone}`;
+      const host = await p.text({
+        message: `${pc.bold(app.name)} · ${kind} hostname ${pc.dim("(blank to skip)")}`,
+        placeholder: suggestion,
+        initialValue: suggestion,
+      });
+      if (p.isCancel(host)) return null;
+      const h = host.trim();
+      if (h) (hostnames[app.name] ??= {})[kind] = h;
+    }
+  }
+
+  const cloudflare: CloudflareConfig = {
+    zone,
+    proxied: true,
+    ssl: "strict",
+    alwaysUseHttps: true,
+    minTlsVersion: "1.2",
+    security: true,
+    cache: true,
+  };
+  return { cloudflare, hostnames };
+}
+
 /** Surface detected secret names so the user knows what they'll need to set. */
 function noteSecrets(apps: DetectedApp[]) {
   const withSecrets = apps.filter((a) => a.secrets.length);
@@ -192,32 +275,47 @@ function assemble({
   apps,
   envs,
   provider,
+  cloudflare,
+  hostnames,
 }: {
   detection: Detection;
   apps: DetectedApp[];
   envs: EnvironmentKind[];
   provider: { org: string; region: string };
+  cloudflare?: CloudflareConfig;
+  hostnames?: HostMap;
 }) {
   const appMap: Record<string, AppConfig> = {};
-  for (const a of apps) appMap[a.name] = appConfigFor({ app: a, envs });
+  for (const a of apps)
+    appMap[a.name] = appConfigFor({ app: a, envs, hosts: hostnames?.[a.name] });
 
-  return {
+  const config: DeploykitConfig = {
     tool: detection.tool,
     packageManager: detection.packageManager,
     nodeVersion: detection.nodeVersion,
     provider: { type: "fly", org: provider.org, region: provider.region },
     apps: appMap,
-  } satisfies DeploykitConfig;
+  };
+  if (cloudflare) config.cloudflare = cloudflare;
+  return config;
 }
 
-function appConfigFor({ app, envs }: { app: DetectedApp; envs: EnvironmentKind[] }) {
+function appConfigFor({
+  app,
+  envs,
+  hosts,
+}: {
+  app: DetectedApp;
+  envs: EnvironmentKind[];
+  hosts?: Partial<Record<EnvironmentKind, string>>;
+}) {
   const environments: Partial<Record<EnvironmentKind, AppEnvironment>> = {};
   if (envs.includes("preview"))
     environments.preview = { name: `${app.name}-pr-{pr}`, trigger: "pr" };
   if (envs.includes("staging"))
-    environments.staging = { name: `${app.name}-staging`, trigger: "push:main" };
+    environments.staging = withHost({ name: `${app.name}-staging`, trigger: "push:main" }, hosts?.staging);
   if (envs.includes("production"))
-    environments.production = { name: `${app.name}-prod`, trigger: "manual" };
+    environments.production = withHost({ name: `${app.name}-prod`, trigger: "manual" }, hosts?.production);
 
   return {
     root: app.root,
@@ -230,6 +328,9 @@ function appConfigFor({ app, envs }: { app: DetectedApp; envs: EnvironmentKind[]
     secrets: app.secrets,
   } satisfies AppConfig;
 }
+
+const withHost = (env: AppEnvironment, hostname?: string): AppEnvironment =>
+  hostname ? { ...env, hostname } : env;
 
 function cancel() {
   p.cancel("Cancelled.");

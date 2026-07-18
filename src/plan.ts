@@ -40,6 +40,26 @@ export function renderPlan({ config, files, opts }: RenderPlanInput) {
     `  Fly.io · org ${pc.cyan(config.provider.org)} · region ${pc.cyan(config.provider.region)}`,
   );
 
+  const cf = config.cloudflare;
+  if (cf) {
+    lines.push("");
+    lines.push(pc.bold("Domains (Cloudflare)"));
+    for (const app of Object.values(config.apps)) {
+      for (const kind of ["staging", "production"] as const) {
+        const env = app.environments[kind];
+        if (env?.hostname)
+          lines.push(
+            `  ${pc.cyan(env.hostname)} ${pc.dim(`→ ${env.name}.fly.dev (${kind})`)}`,
+          );
+      }
+    }
+    lines.push(
+      pc.dim(
+        `  zone ${cf.zone} · ${cf.proxied ? "proxied" : "DNS-only"} · SSL ${cf.ssl} · TLS≥${cf.minTlsVersion}${cf.security ? " · security" : ""}${cf.cache ? " · caching" : ""}`,
+      ),
+    );
+  }
+
   const flyApps = flyAppNames(config);
   const willProvision = !opts.yes || opts.provision;
   lines.push("");
@@ -55,6 +75,12 @@ export function renderPlan({ config, files, opts }: RenderPlanInput) {
     const secrets = secretNames(config);
     if (secrets.length)
       lines.push(`  Set app secrets (per environment): ${secrets.join(", ")}`);
+    if (cf) {
+      const hostCount = Object.values(config.apps)
+        .flatMap((a) => [a.environments.staging, a.environments.production])
+        .filter((e) => e?.hostname).length;
+      lines.push(`  Cloudflare: ${hostCount} domain(s) — Fly certs, DNS, SSL/security/caching`);
+    }
   } else {
     lines.push(pc.dim("  skipped (pass --provision to create Fly apps + secrets)"));
   }

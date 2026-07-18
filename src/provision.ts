@@ -90,6 +90,72 @@ export async function createFlyApps({
   return results;
 }
 
+export interface FlyCertInfo {
+  ok: boolean;
+  /** Hostname for the ACME validation CNAME, e.g. "_acme-challenge.app.example.com". */
+  validationHostname?: string;
+  /** Target the validation CNAME points at, e.g. "app.example.com.xxxx.flydns.net". */
+  validationTarget?: string;
+  detail?: string;
+}
+
+/**
+ * Ensure a Fly cert exists for `hostname` on `app` and return the DNS
+ * validation record Fly wants. Idempotent: if the cert already exists we read
+ * it back with `certs show` instead of failing.
+ */
+export async function ensureFlyCert({
+  hostname,
+  app,
+  cwd,
+}: {
+  hostname: string;
+  app: string;
+  cwd: string;
+}): Promise<FlyCertInfo> {
+  const create = await exec({
+    cmd: "flyctl",
+    args: ["certs", "create", hostname, "-a", app, "--json"],
+    cwd,
+  });
+  let raw = create.stdout;
+  if (create.code !== 0) {
+    if (/already|exists/i.test(create.stderr)) {
+      const show = await exec({
+        cmd: "flyctl",
+        args: ["certs", "show", hostname, "-a", app, "--json"],
+        cwd,
+      });
+      if (show.code !== 0) return { ok: false, detail: show.stderr.trim() };
+      raw = show.stdout;
+    } else {
+      return { ok: false, detail: create.stderr.trim() || "flyctl certs create failed" };
+    }
+  }
+  return { ok: true, ...parseCertValidation(raw) };
+}
+
+/** Pull the ACME validation hostname/target out of `flyctl certs` JSON (casing varies). */
+function parseCertValidation(raw: string): Pick<FlyCertInfo, "validationHostname" | "validationTarget"> {
+  let obj: Record<string, unknown>;
+  try {
+    obj = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+  const pick = (keys: string[]) => {
+    for (const k of keys) {
+      const v = obj[k];
+      if (typeof v === "string" && v) return v;
+    }
+    return undefined;
+  };
+  return {
+    validationHostname: pick(["DNSValidationHostname", "DnsValidationHostname", "dnsValidationHostname"]),
+    validationTarget: pick(["DNSValidationTarget", "DnsValidationTarget", "dnsValidationTarget"]),
+  };
+}
+
 /** Resolve the current repo as "owner/name", or null if gh can't determine it. */
 export async function getRepo(cwd: string) {
   return tryExec({

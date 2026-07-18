@@ -37,6 +37,37 @@ export interface AppEnvironment {
    */
   name: string;
   trigger: Trigger;
+  /**
+   * Custom domain served for this environment, e.g. "app.example.com".
+   * Only meaningful for staging/production — previews stay on `*.fly.dev`.
+   * When set (and a `cloudflare` block exists), deploykit issues a Fly cert
+   * and wires the Cloudflare DNS records.
+   */
+  hostname?: string;
+}
+
+export type CloudflareSslMode = "off" | "flexible" | "full" | "strict";
+export type MinTlsVersion = "1.0" | "1.1" | "1.2" | "1.3";
+
+/**
+ * Cloudflare DNS/CDN settings for the custom domains. Optional — omit it and
+ * deploykit leaves DNS alone (apps stay reachable on `*.fly.dev`).
+ */
+export interface CloudflareConfig {
+  /** Registrable zone that owns the hostnames, e.g. "example.com". */
+  zone: string;
+  /** Route traffic through Cloudflare's proxy (orange cloud) vs DNS-only. */
+  proxied: boolean;
+  /** Zone SSL mode. Use "strict" with proxied Fly apps to avoid redirect loops. */
+  ssl: CloudflareSslMode;
+  /** Turn on the "Always Use HTTPS" edge redirect. */
+  alwaysUseHttps: boolean;
+  /** Minimum TLS version accepted at the edge. */
+  minTlsVersion: MinTlsVersion;
+  /** Apply a security baseline (security level + bot fight mode, managed WAF best-effort). */
+  security: boolean;
+  /** Add cache rules for static assets (+ browser cache TTL). */
+  cache: boolean;
 }
 
 export interface AppConfig {
@@ -70,6 +101,8 @@ export interface DeploykitConfig {
   provider: ProviderConfig;
   /** Deployable apps keyed by their short name (last path segment). */
   apps: Record<string, AppConfig>;
+  /** Optional Cloudflare DNS/CDN wiring for custom domains. */
+  cloudflare?: CloudflareConfig;
 }
 
 /** Identity helper re-exported into the generated config for editor types. */
