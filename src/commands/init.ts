@@ -7,15 +7,22 @@ import { preflight } from "../preflight.js";
 import { openPr } from "../pr.js";
 import {
   createFlyApps,
+  createFlyOrgToken,
   createGithubEnvironments,
   ensureGithubEnvironment,
   getRepo,
-  setFlyTokenSecret,
+  listFlyApps,
+  listGithubEnvironments,
+  listGithubSecretNames,
   setGithubSecret,
   type StepResult,
 } from "../provision.js";
 import { buildConfig, type InitOptions } from "../prompts.js";
+import { saveSecretsFile, type SecretGroup } from "../secrets-file.js";
 import { pc } from "../util/log.js";
+
+/** Accumulates plaintext secret values set during a run for optional local export. */
+type SecretCapture = (label: string, name: string, value: string) => void;
 
 type Spinner = ReturnType<typeof p.spinner>;
 
@@ -103,55 +110,194 @@ async function runProvisioning({
   flyReady,
   ghReady,
 }: RunProvisioningInput) {
+  // Plaintext values set this run, grouped by section, offered as a local
+  // export at the end so the user can archive them (e.g. into 1Password).
+  const captured = new Map<string, { name: string; value: string }[]>();
+  const capture: SecretCapture = (label, name, value) => {
+    const entries = captured.get(label) ?? [];
+    entries.push({ name, value });
+    captured.set(label, entries);
+  };
+
+  // Resolve the repo once — needed for token, environments, and secrets.
+  const repo = ghReady ? await getRepo(opts.cwd) : null;
+  if (ghReady && !repo) {
+    p.log.warn("Couldn't resolve the GitHub repo (gh repo view) — skipping GitHub steps.");
+  }
+
+  await provisionFlyApps({ config, opts, flyReady });
+  if (flyReady && repo) await provisionFlyToken({ config, opts, repo, capture });
+  if (repo) await provisionEnvironments({ config, opts, repo });
+  if (repo) await provisionSecrets({ config, opts, repo, capture });
+
+  await maybeSaveSecrets({ opts, captured });
+}
+
+/** Create the staging/production Fly apps that don't exist yet. */
+async function provisionFlyApps({
+  config,
+  opts,
+  flyReady,
+}: {
+  config: DeploykitConfig;
+  opts: InitOptions;
+  flyReady: boolean;
+}) {
   if (!flyReady) {
     p.log.warn("Skipping Fly provisioning — `flyctl` is not authenticated.");
-  } else if (
-    await confirm({ opts, message: `Create Fly apps (${flyAppNames(config).join(", ")})?` })
-  ) {
-    const s = p.spinner();
-    s.start("Creating Fly apps");
-    report({ spinner: s, results: await createFlyApps({ config, cwd: opts.cwd }) });
+    return;
+  }
+  const wanted = flyAppNames(config);
+  if (wanted.length === 0) return;
+
+  const existing = await listFlyApps(opts.cwd);
+  const missing = existing ? wanted.filter((n) => !existing.includes(n)) : wanted;
+  if (existing && missing.length === 0) {
+    p.log.info(`Fly apps already exist — skipping (${wanted.join(", ")}).`);
+    return;
+  }
+  if (!(await confirm({ opts, message: `Create Fly app(s) (${missing.join(", ")})?` }))) return;
+
+  const s = p.spinner();
+  s.start("Creating Fly apps");
+  report({
+    spinner: s,
+    results: await createFlyApps({ names: missing, org: config.provider.org, cwd: opts.cwd }),
+  });
+}
+
+/**
+ * Create an org-scoped Fly deploy token and store it as FLY_API_TOKEN. Skipped
+ * if the secret already exists, so re-runs don't mint duplicate tokens.
+ */
+async function provisionFlyToken({
+  config,
+  opts,
+  repo,
+  capture,
+}: {
+  config: DeploykitConfig;
+  opts: InitOptions;
+  repo: string;
+  capture: SecretCapture;
+}) {
+  const existing = await listGithubSecretNames({ repo, cwd: opts.cwd });
+  if (existing.has("FLY_API_TOKEN")) {
+    p.log.info("FLY_API_TOKEN already set — skipping (delete it to rotate).");
+    return;
+  }
+  if (!(await confirm({ opts, message: "Create a Fly deploy token and set FLY_API_TOKEN?" }))) {
+    return;
   }
 
+  const s = p.spinner();
+  s.start("Creating Fly deploy token");
+  const tok = await createFlyOrgToken({ org: config.provider.org, cwd: opts.cwd });
+  if (!tok.ok || !tok.token) {
+    s.stop(pc.red(`Fly token: ${tok.detail ?? "failed"}`));
+    return;
+  }
+  const res = await setGithubSecret({
+    name: "FLY_API_TOKEN",
+    value: tok.token,
+    repo,
+    cwd: opts.cwd,
+  });
+  s.stop(
+    res.ok
+      ? pc.green("✔ Created Fly deploy token (visible under Fly → Tokens) + set FLY_API_TOKEN")
+      : pc.red(`FLY_API_TOKEN: ${res.detail ?? "failed"}`),
+  );
+  if (res.ok) capture("Fly", "FLY_API_TOKEN", tok.token);
+}
+
+/** Create the GitHub deployment environments that don't exist yet. */
+async function provisionEnvironments({
+  config,
+  opts,
+  repo,
+}: {
+  config: DeploykitConfig;
+  opts: InitOptions;
+  repo: string;
+}) {
+  const kinds: string[] = [];
+  if (Object.values(config.apps).some((a) => a.environments.staging)) kinds.push("staging");
+  if (Object.values(config.apps).some((a) => a.environments.production)) kinds.push("production");
+  if (kinds.length === 0) return;
+
+  const existing = new Set((await listGithubEnvironments({ repo, cwd: opts.cwd })) ?? []);
+  const missing = kinds.filter((k) => !existing.has(k));
+  if (missing.length === 0) {
+    p.log.info(`GitHub environments already exist — skipping (${kinds.join(", ")}).`);
+    return;
+  }
+  if (!(await confirm({ opts, message: `Create GitHub environment(s) (${missing.join(", ")})?` }))) {
+    return;
+  }
+
+  const s = p.spinner();
+  s.start("Creating environments");
+  // createGithubEnvironments is idempotent — it re-skips any that now exist.
+  report({ spinner: s, results: await createGithubEnvironments({ config, cwd: opts.cwd }) });
+}
+
+/**
+ * Offer to write the secrets set this run to a gitignored, 0600 local file.
+ * Useful for the FLY_API_TOKEN in particular — it's machine-generated, so this
+ * is the only place the user can capture it for a password manager.
+ */
+async function maybeSaveSecrets({
+  opts,
+  captured,
+}: {
+  opts: InitOptions;
+  captured: Map<string, { name: string; value: string }[]>;
+}) {
+  if (opts.yes || captured.size === 0) return;
+
+  const count = [...captured.values()].reduce((n, e) => n + e.length, 0);
   if (
-    flyReady &&
-    ghReady &&
-    (await confirm({ opts, message: "Set FLY_API_TOKEN GitHub secret?" }))
+    !(await confirm({
+      opts,
+      message: `Save a local plaintext copy of the ${count} secret(s) set this run? (gitignored)`,
+    }))
   ) {
-    const s = p.spinner();
-    s.start("Setting secret");
-    report({ spinner: s, results: [await setFlyTokenSecret(opts.cwd)] });
+    return;
   }
 
-  if (
-    ghReady &&
-    (await confirm({ opts, message: "Create GitHub environments (staging/production)?" }))
-  ) {
-    const s = p.spinner();
-    s.start("Creating environments");
-    report({
-      spinner: s,
-      results: await createGithubEnvironments({ config, cwd: opts.cwd }),
-    });
+  const groups: SecretGroup[] = [...captured.entries()].map(([label, entries]) => ({
+    label,
+    entries,
+  }));
+  const res = saveSecretsFile({ cwd: opts.cwd, groups });
+  p.log.success(pc.green(`Wrote ${res.path} ${pc.dim("(chmod 600)")}`));
+  if (!res.gitignored) {
+    p.log.warn(`Couldn't update .gitignore automatically — add ${res.path} yourself.`);
   }
-
-  // Environments must exist before we can set environment-scoped secrets, so
-  // this runs after createGithubEnvironments.
-  if (ghReady) await provisionSecrets({ config, opts });
+  p.note(
+    `Plaintext copies live in ${pc.bold(res.path)}.\nMove them into 1Password / your secret manager, then delete the file.`,
+    "Local secrets",
+  );
 }
 
 /**
  * Offer to set each app's detected env vars as GitHub secrets, scoped to the
  * environments the user selected. Values are prompted (masked) per environment
  * since staging and production usually differ; blank input skips that secret.
- * Skipped in --yes mode — there's no way to collect values non-interactively.
+ * Already-set secrets are skipped with an info line, so re-runs only ask for
+ * what's missing. Skipped in --yes mode — no way to collect values there.
  */
 async function provisionSecrets({
   config,
   opts,
+  repo,
+  capture,
 }: {
   config: DeploykitConfig;
   opts: InitOptions;
+  repo: string;
+  capture: SecretCapture;
 }) {
   if (opts.yes) return;
 
@@ -161,23 +307,36 @@ async function provisionSecrets({
   const targets = secretTargets(config);
   if (targets.length === 0) return;
 
-  const envList = targets.map((t) => t.label).join(", ");
+  // What's already set per target, so we only prompt for what's missing.
+  const existingByLabel = new Map<string, Set<string>>();
+  for (const t of targets) {
+    existingByLabel.set(t.label, await listGithubSecretNames({ env: t.env, repo, cwd: opts.cwd }));
+  }
+  const missingCount = targets.reduce(
+    (n, t) => n + names.filter((nm) => !existingByLabel.get(t.label)!.has(nm)).length,
+    0,
+  );
+  if (missingCount === 0) {
+    p.log.info("App secrets already set for the selected environments — skipping.");
+    return;
+  }
+
   if (
     !(await confirm({
       opts,
-      message: `Set ${names.length} secret(s) as GitHub secrets for: ${envList}?`,
+      message: `Set ${missingCount} missing secret(s)? (already-set ones are skipped)`,
     }))
   ) {
     return;
   }
 
-  const repo = await getRepo(opts.cwd);
-  if (!repo) {
-    p.log.warn("Skipping secrets — couldn't resolve the GitHub repo (gh repo view).");
-    return;
-  }
-
   for (const target of targets) {
+    const existing = existingByLabel.get(target.label)!;
+    const toSet = names.filter((nm) => !existing.has(nm));
+    if (toSet.length === 0) {
+      p.log.info(`${target.kind}: all secrets already set — skipping.`);
+      continue;
+    }
     p.log.step(
       target.env
         ? `Secrets for ${pc.bold(target.kind)} ${pc.dim(`(environment: ${target.env})`)}`
@@ -187,7 +346,7 @@ async function provisionSecrets({
     if (target.env) {
       await ensureGithubEnvironment({ env: target.env, repo, cwd: opts.cwd });
     }
-    for (const name of names) {
+    for (const name of toSet) {
       const value = await p.password({
         message: `${name} ${pc.dim(`— ${target.kind}`)} (blank to skip)`,
       });
@@ -206,8 +365,12 @@ async function provisionSecrets({
         repo,
         cwd: opts.cwd,
       });
-      if (res.ok) p.log.success(pc.green(res.label));
-      else p.log.error(`${res.label}: ${res.detail ?? "failed"}`);
+      if (res.ok) {
+        p.log.success(pc.green(res.label));
+        capture(target.label, name, value);
+      } else {
+        p.log.error(`${res.label}: ${res.detail ?? "failed"}`);
+      }
     }
   }
 }
@@ -264,7 +427,7 @@ function nextSteps({ config, opts }: { config: DeploykitConfig; opts: InitOption
   const provisioningOffered = !opts.yes || opts.provision;
   if (!provisioningOffered) {
     lines.push(
-      '  • Set the FLY_API_TOKEN secret: gh secret set FLY_API_TOKEN --body "$(fly auth token)"',
+      `  • Create a Fly deploy token + set it: flyctl tokens create org --org ${config.provider.org} | gh secret set FLY_API_TOKEN`,
     );
     lines.push(`  • Create Fly apps: ${flyAppNames(config).join(", ")}`);
   } else {
