@@ -15,7 +15,8 @@ ${pc.bold("Options")}
       --org <slug>    Fly organization slug
       --region <code> Fly primary region (default: iad)
       --dry-run       Detect and print the plan, write nothing
-      --provision     Create Fly apps + set FLY_API_TOKEN secret (each confirmed)
+      --provision     Force provisioning in --yes mode (Fly apps, FLY_API_TOKEN,
+                      GitHub environments). Interactive runs offer it inline.
       --pr            Commit generated files on a branch and open a PR
       --force         Overwrite existing generated files instead of skipping
       --cwd <dir>     Run against a different directory

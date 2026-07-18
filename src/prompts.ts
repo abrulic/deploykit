@@ -6,6 +6,7 @@ import type {
   EnvironmentKind,
 } from "./config.js";
 import type { DetectedApp, Detection } from "./detect.js";
+import { listFlyOrgs } from "./fly.js";
 import { pc } from "./util/log.js";
 
 export interface InitOptions {
@@ -47,9 +48,12 @@ const ALL_ENVS: EnvironmentKind[] = ["preview", "staging", "production"];
 export async function buildConfig({
   detection,
   opts,
+  flyReady = false,
 }: {
   detection: Detection;
   opts: InitOptions;
+  /** Whether flyctl is authenticated — enables the org picker. */
+  flyReady?: boolean;
 }) {
   const deployable = detection.apps.filter((a) => a.deployable);
 
@@ -61,7 +65,7 @@ export async function buildConfig({
   const envs = await pickEnvironments();
   if (!envs) return cancel();
 
-  const provider = await pickProvider(opts);
+  const provider = await pickProvider(opts, flyReady);
   if (!provider) return cancel();
 
   noteSecrets(chosenApps);
@@ -109,23 +113,23 @@ async function pickApps(deployable: DetectedApp[]) {
 }
 
 async function pickEnvironments() {
+  // No pre-selection: the chosen set is exactly what the user checks, so
+  // highlighting "Staging" and hitting enter yields staging only.
   const choice = await p.multiselect({
-    message: "Which environments?",
+    message: "Which environments? (space to toggle, enter to confirm)",
     options: ENV_OPTIONS,
-    initialValues: ALL_ENVS,
     required: true,
   });
-  return p.isCancel(choice) ? null : choice;
+  // ENV_OPTIONS values are all EnvironmentKind; clack widens to unknown[] here
+  // because there's no initialValues to infer from.
+  return p.isCancel(choice) ? null : (choice as EnvironmentKind[]);
 }
 
-async function pickProvider(opts: InitOptions) {
-  const org = await p.text({
-    message: "Fly organization slug",
-    placeholder: opts.org ?? "personal",
-    initialValue: opts.org ?? "",
-    validate: (v) => (v.trim() ? undefined : "Required"),
-  });
-  if (p.isCancel(org)) return null;
+const MANUAL_ORG = "__manual__";
+
+async function pickProvider(opts: InitOptions, flyReady: boolean) {
+  const org = await pickOrg(opts, flyReady);
+  if (org === null) return null;
 
   const region = await p.select({
     message: "Default Fly region",
@@ -134,7 +138,41 @@ async function pickProvider(opts: InitOptions) {
   });
   if (p.isCancel(region)) return null;
 
-  return { org: org.trim(), region };
+  return { org, region };
+}
+
+/**
+ * Pick a Fly org. When flyctl is authenticated we list the orgs on the account
+ * so the user can select instead of remembering slugs; otherwise (or if the
+ * user picks "enter manually") we fall back to a free-text slug.
+ */
+async function pickOrg(opts: InitOptions, flyReady: boolean): Promise<string | null> {
+  const orgs = flyReady ? await listFlyOrgs(opts.cwd) : null;
+  if (!orgs) return typeOrg(opts);
+
+  const sel = await p.select({
+    message: "Fly organization",
+    options: [
+      ...orgs.map((o) => ({
+        value: o.slug,
+        label: o.name && o.name !== o.slug ? `${o.slug} ${pc.dim(`— ${o.name}`)}` : o.slug,
+      })),
+      { value: MANUAL_ORG, label: pc.dim("Enter a slug manually…") },
+    ],
+    initialValue: opts.org && orgs.some((o) => o.slug === opts.org) ? opts.org : orgs[0]?.slug,
+  });
+  if (p.isCancel(sel)) return null;
+  return sel === MANUAL_ORG ? typeOrg(opts) : sel;
+}
+
+async function typeOrg(opts: InitOptions): Promise<string | null> {
+  const org = await p.text({
+    message: "Fly organization slug",
+    placeholder: opts.org ?? "personal",
+    initialValue: opts.org ?? "",
+    validate: (v) => (v.trim() ? undefined : "Required"),
+  });
+  return p.isCancel(org) ? null : org.trim();
 }
 
 /** Surface detected secret names so the user knows what they'll need to set. */
