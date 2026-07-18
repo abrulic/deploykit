@@ -69,7 +69,8 @@ describe("generateDockerfile (Nx, package-based / server model)", () => {
   it("ships the built workspace and runs the app's start script", () => {
     expect(out).toContain("COPY --from=build --chown=appuser:nodejs /app ./");
     expect(out).toContain("WORKDIR /app/test-apps/storefront-app");
-    expect(out).toContain('CMD ["pnpm","start"]');
+    // No startCommand on this fixture → npm start (the runner has no project pm).
+    expect(out).toContain('CMD ["npm","start"]');
     expect(out).not.toContain("main.js");
   });
 

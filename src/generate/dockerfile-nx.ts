@@ -8,6 +8,7 @@ import {
   prismaSteps,
   runnerHeader,
   serveModel,
+  serverCmd,
 } from "./dockerfile-shared.js";
 import type { GenerateAppFileInput } from "./types.js";
 
@@ -73,7 +74,7 @@ CMD ["node", "main.js"]
     // General server (SSR frameworks, package-based Nx, or an explicit command):
     // ship the built workspace and run the app's own start command. Copying the
     // whole workspace is robust to whatever layout the framework emits.
-    const cmd = JSON.stringify(app.startCommand ?? pm.start);
+    const cmd = serverCmd(app);
     return `${header}
 
 # SSR / server runtime — copy the built workspace and run the app's start command.

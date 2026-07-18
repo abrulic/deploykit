@@ -231,8 +231,13 @@ describe("detect (React Router 7 / package-based Nx)", () => {
     expect(result.nxIntegrated).toBe(false);
     expect(app?.framework).toBe("react-router");
     expect(app?.serve).toBe("server");
-    // Clean `start` script → no explicit command (the runner uses `pnpm start`).
-    expect(app?.startCommand).toBeUndefined();
+    // A direct `node` command runs react-router-serve's bin, so the runner
+    // needs no package manager (a bare node image has none).
+    expect(app?.startCommand).toEqual([
+      "node",
+      "node_modules/@react-router/serve/bin.js",
+      "./build/server/index.js",
+    ]);
   });
 
   it("resolves the Node version from the app's engines, not just the root", () => {

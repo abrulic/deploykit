@@ -109,7 +109,7 @@ export function detect(cwd: string): Detection {
     : "nx";
   const packageManager = detectPackageManager(cwd);
 
-  const { apps, libs, nxIntegrated } = detectProjects({ cwd, tool, packageManager });
+  const { apps, libs, nxIntegrated } = detectProjects({ cwd, tool });
   apps.sort((a, b) => a.name.localeCompare(b.name));
   libs.sort((a, b) => a.name.localeCompare(b.name));
 
@@ -151,29 +151,25 @@ export function detect(cwd: string): Detection {
 function detectProjects({
   cwd,
   tool,
-  packageManager,
 }: {
   cwd: string;
   tool: MonorepoTool;
-  packageManager: PackageManager;
 }): Projects & { nxIntegrated: boolean } {
   if (tool === "nx") {
-    const nx = detectNxProjects({ cwd, packageManager });
+    const nx = detectNxProjects({ cwd });
     // Integrated Nx uses project.json; package-based Nx falls back to package.json.
     if (nx.apps.length || nx.libs.length) return { ...nx, nxIntegrated: true };
   }
-  return { ...detectPackageProjects({ cwd, tool, packageManager }), nxIntegrated: false };
+  return { ...detectPackageProjects({ cwd, tool }), nxIntegrated: false };
 }
 
 // ── Package-based detection (Turbo, or Nx with per-package package.json) ──────
 function detectPackageProjects({
   cwd,
   tool,
-  packageManager,
 }: {
   cwd: string;
   tool: MonorepoTool;
-  packageManager: PackageManager;
 }): Projects {
   const dirs = new Set<string>();
   for (const pattern of workspaceGlobs(cwd)) {
@@ -216,7 +212,6 @@ function detectPackageProjects({
       root: r.dir,
       nxIntegrated: false,
       tool,
-      packageManager,
     });
 
     apps.push({
@@ -244,13 +239,7 @@ function detectPackageProjects({
 }
 
 // ── Nx detection (integrated repos, via project.json) ────────────────────────
-function detectNxProjects({
-  cwd,
-  packageManager,
-}: {
-  cwd: string;
-  packageManager: PackageManager;
-}): Projects {
+function detectNxProjects({ cwd }: { cwd: string }): Projects {
   const projects = findFilesByName({ root: cwd, filename: "project.json", limit: 1000 })
     .map((file) => {
       const proj = readJson<NxProjectJson>(join(cwd, file));
@@ -285,7 +274,6 @@ function detectNxProjects({
       root,
       nxIntegrated: true,
       tool: "nx",
-      packageManager,
     });
 
     apps.push({
@@ -441,14 +429,6 @@ export function detectFramework(pkg: PackageJson): Framework | null {
   return null;
 }
 
-/** Per-package-manager prefix to run a locally-installed binary (resolves .bin). */
-const EXEC_PREFIX: Record<PackageManager, string[]> = {
-  pnpm: ["pnpm", "exec"],
-  npm: ["npx"],
-  yarn: ["yarn", "exec"],
-  bun: ["bunx"],
-};
-
 interface ServeInfo {
   serve: ServeModel;
   startCommand?: string[];
@@ -469,7 +449,6 @@ function detectServeModel({
   root,
   nxIntegrated,
   tool,
-  packageManager,
 }: {
   pkg?: PackageJson;
   framework: Framework;
@@ -477,7 +456,6 @@ function detectServeModel({
   root: string;
   nxIntegrated: boolean;
   tool: MonorepoTool;
-  packageManager: PackageManager;
 }): ServeInfo {
   // Nx integrated writes to dist/<root>; turbo / package-based write in the pkg dir.
   const staticBase = tool === "nx" && nxIntegrated ? `dist/${root}` : `${root}/dist`;
@@ -488,12 +466,12 @@ function detectServeModel({
     case "next":
     case "remix":
     case "node-server":
-      return server(resolveStartCommand({ pkg, framework, packageManager }));
+      return server(resolveStartCommand(framework));
 
     case "react-router": {
       // Framework mode: SSR by default; only `ssr:false` yields a static SPA.
       if (reactRouterSsr(appAbs)) {
-        return server(resolveStartCommand({ pkg, framework, packageManager }));
+        return server(resolveStartCommand(framework));
       }
       return { serve: "static", outputDir: `${root}/build/client`, spa: true };
     }
@@ -501,7 +479,7 @@ function detectServeModel({
     case "astro":
       // A node adapter turns Astro into a server; otherwise it's a static site.
       if (deps["@astrojs/node"]) {
-        return server(resolveStartCommand({ pkg, framework, packageManager }));
+        return server(resolveStartCommand(framework));
       }
       return { serve: "static", outputDir: staticBase, spa: false };
 
@@ -522,34 +500,18 @@ function reactRouterSsr(appAbs?: string): boolean {
 }
 
 /**
- * The run command for a server app, or undefined to let the runner invoke the
- * app's own `start` script via the package manager. A clean single-command
- * `start` is left to the package manager (it resolves node_modules/.bin). Only
- * when `start` is container-hostile (env sourcing, chained `&&`) or missing do
- * we synthesize a known-good command per framework.
+ * The run command for a server app, or undefined to fall back to `npm start`.
+ * Known SSR frameworks get a direct `node` command: the server runs as PID 1
+ * (so it receives SIGTERM for a graceful shutdown) and needs no package manager
+ * in the runner — which is a bare node image without one. Unknown frameworks
+ * defer to `npm start`, which runs the app's own `start` script.
  */
-function resolveStartCommand({
-  pkg,
-  framework,
-  packageManager,
-}: {
-  pkg?: PackageJson;
-  framework: Framework;
-  packageManager: PackageManager;
-}): string[] | undefined {
-  const start = pkg?.scripts?.start?.trim();
-  if (start && isCleanStart(start)) return undefined; // runner uses `<pm> start`
-
-  const exec = EXEC_PREFIX[packageManager];
+function resolveStartCommand(framework: Framework): string[] | undefined {
+  // react-router-serve is the SSR server; run its bin directly with node.
   if (framework === "react-router")
-    return [...exec, "react-router-serve", "./build/server/index.js"];
+    return ["node", "node_modules/@react-router/serve/bin.js", "./build/server/index.js"];
   if (framework === "astro") return ["node", "./dist/server/entry.mjs"];
-  return undefined; // best effort: runner falls back to `<pm> start`
-}
-
-/** A `start` script safe to run verbatim: no shell operators / env sourcing. */
-function isCleanStart(start: string): boolean {
-  return !/[&|;`$<>]|(^|\s)set\s+-a(\s|$)|(^|\s)source\s|(^|\s)\.\s/.test(start);
+  return undefined;
 }
 
 /**

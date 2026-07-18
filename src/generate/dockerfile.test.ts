@@ -36,7 +36,9 @@ describe("generateDockerfile", () => {
 
   it("emits a server runner that runs the start script", () => {
     const out = gen("node-server");
-    expect(out).toContain('CMD ["pnpm","start"]');
+    // The runner has no project package manager; npm (always present) runs the
+    // app's own `start` script.
+    expect(out).toContain('CMD ["npm","start"]');
   });
 
   it("emits a static server runner for astro/vite", () => {
