@@ -2,7 +2,14 @@ import * as p from "@clack/prompts";
 import type { DeploykitConfig } from "../config.js";
 import { detect } from "../detect.js";
 import { planFiles, writeFiles } from "../generate/index.js";
-import { flyAppNames, renderPlan, secretNames, secretTargets } from "../plan.js";
+import {
+  flyAppNames,
+  mergeSecretTargets,
+  renderPlan,
+  secretNames,
+  secretTargets,
+  type SecretTarget,
+} from "../plan.js";
 import { preflight } from "../preflight.js";
 import { openPr } from "../pr.js";
 import {
@@ -24,6 +31,21 @@ import { pc } from "../util/log.js";
 
 /** Accumulates plaintext secret values set during a run for optional local export. */
 type SecretCapture = (label: string, name: string, value: string) => void;
+
+/**
+ * Palette of distinct colors, assigned to secret targets by position. Keeping
+ * it positional (rather than keyed by a fixed set of environment names) means
+ * any environments a user has on their repo — however many, whatever named —
+ * each get their own color so the sections are easy to tell apart. Cycles if
+ * there are more targets than colors.
+ */
+const envPalette: Array<(s: string) => string> = [
+  pc.cyan,
+  pc.magenta,
+  pc.yellow,
+  pc.blue,
+  pc.green,
+];
 
 type Spinner = ReturnType<typeof p.spinner>;
 
@@ -52,12 +74,9 @@ export async function runInit(opts: InitOptions) {
   );
 
   // ── Phase 2: ask ──
-  const config = await buildConfig({
-    detection,
-    opts,
-    flyReady: pre.flyReady,
-    cfReady: pre.cfReady,
-  });
+  // The Cloudflare step resolves its own token (env → .deploykit/credentials →
+  // prompt) and exports it, so the provisioning phase below picks it up.
+  const config = await buildConfig({ detection, opts, flyReady: pre.flyReady });
   if (!config) return 1; // cancelled or missing org
 
   // ── Phase 3: plan ──
@@ -344,6 +363,38 @@ async function maybeSaveSecrets({
 }
 
 /**
+ * Decide which environments to set secrets for. When the repo has environments
+ * beyond the ones deploykit configured, prompt a multiselect so the user can
+ * opt those in (deploykit's own are pre-checked; discovered ones are hinted and
+ * left unchecked). With nothing extra, just return the candidates unchanged.
+ * Returns null if the user cancels the selection.
+ */
+async function selectSecretTargets({
+  candidates,
+  opts,
+}: {
+  candidates: SecretTarget[];
+  opts: InitOptions;
+}): Promise<SecretTarget[] | null> {
+  const hasDiscovered = candidates.some((t) => !t.kind);
+  if (!hasDiscovered || opts.yes) return candidates;
+
+  const selected = await p.multiselect({
+    message: "Set app secrets for which environments?",
+    options: candidates.map((t) => ({
+      value: t.label,
+      label: t.env ?? t.label,
+      hint: t.kind ? undefined : "existing on your repo",
+    })),
+    initialValues: candidates.filter((t) => t.kind).map((t) => t.label),
+    required: false,
+  });
+  if (p.isCancel(selected)) return null;
+  const chosen = new Set(selected);
+  return candidates.filter((t) => chosen.has(t.label));
+}
+
+/**
  * Offer to set each app's detected env vars as GitHub secrets, scoped to the
  * environments the user selected. Values are prompted (masked) per environment
  * since staging and production usually differ; blank input skips that secret.
@@ -366,7 +417,16 @@ async function provisionSecrets({
   const names = secretNames(config);
   if (names.length === 0) return;
 
-  const targets = secretTargets(config);
+  const configTargets = secretTargets(config);
+  if (configTargets.length === 0) return;
+
+  // Environments deploykit models aren't the whole story — the repo may have
+  // others the user created (named anything). Fold those in so secrets can be
+  // set for them too; if there are any, let the user pick which to target.
+  const ghEnvs = await listGithubEnvironments({ repo, cwd: opts.cwd });
+  const candidates = mergeSecretTargets({ configTargets, ghEnvs });
+  const targets = await selectSecretTargets({ candidates, opts });
+  if (targets === null) return; // cancelled
   if (targets.length === 0) return;
 
   // What's already set per target, so we only prompt for what's missing.
@@ -392,32 +452,42 @@ async function provisionSecrets({
     return;
   }
 
-  for (const target of targets) {
+  const multiEnv = targets.length > 1;
+  for (const [i, target] of targets.entries()) {
+    const color = envPalette[i % envPalette.length]!;
+    // Prefer the real GitHub environment name (which can be anything the user
+    // set up); fall back to the label for repo-level targets that have no env.
+    const title = target.env ?? target.kind ?? target.label;
+    const scope = target.env ? `environment: ${target.env}` : "repository-level";
+    // Flag targets deploykit didn't configure so it's clear they came from the repo.
+    const discovered = !target.kind ? pc.dim(" · existing on repo") : "";
     const existing = existingByLabel.get(target.label)!;
     const toSet = names.filter((nm) => !existing.has(nm));
     if (toSet.length === 0) {
-      p.log.info(`${target.kind}: all secrets already set — skipping.`);
+      p.log.info(`${color(pc.bold(title))} ${pc.dim(`(${scope})`)} — all secrets already set, skipping.`);
       continue;
     }
-    p.log.step(
-      target.env
-        ? `Secrets for ${pc.bold(target.kind)} ${pc.dim(`(environment: ${target.env})`)}`
-        : `Secrets for ${pc.bold(target.kind)} ${pc.dim("(repository-level)")}`,
-    );
+    // A colored, bold section header per environment so that when several
+    // environments are set up in one run each block is easy to tell apart.
+    const header = `${color(pc.bold(title.toUpperCase()))} secrets ${pc.dim(
+      `(${scope}) · ${toSet.length} to set`,
+    )}${discovered}`;
+    if (multiEnv) p.log.message(color("─".repeat(28)));
+    p.log.step(header);
     // Env-scoped secrets require the environment to exist first.
     if (target.env) {
       await ensureGithubEnvironment({ env: target.env, repo, cwd: opts.cwd });
     }
     for (const name of toSet) {
       const value = await p.password({
-        message: `${name} ${pc.dim(`— ${target.kind}`)} (blank to skip)`,
+        message: `${pc.bold(name)} ${color(`· ${title}`)} ${pc.dim("(blank to skip)")}`,
       });
       if (p.isCancel(value)) {
         p.log.warn("Stopped setting secrets.");
         return;
       }
       if (!value.trim()) {
-        p.log.warn(`skipped ${name} (${target.kind})`);
+        p.log.warn(`skipped ${name} ${color(`(${title})`)}`);
         continue;
       }
       const res = await setGithubSecret({
@@ -428,7 +498,7 @@ async function provisionSecrets({
         cwd: opts.cwd,
       });
       if (res.ok) {
-        p.log.success(pc.green(res.label));
+        p.log.success(color(res.label));
         capture(target.label, name, value);
       } else {
         p.log.error(`${res.label}: ${res.detail ?? "failed"}`);

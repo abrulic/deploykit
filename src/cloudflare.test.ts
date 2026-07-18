@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   findDnsRecord,
   getZone,
+  listCloudflareZones,
   setZoneSetting,
   upsertDnsRecord,
 } from "./cloudflare.js";
@@ -136,6 +137,27 @@ describe("cloudflare client", () => {
       vi.stubGlobal("fetch", fetchSpy);
       const res = await findDnsRecord({ token: TOKEN, zoneId: "z1", type: "CNAME", name: "x.example.com" });
       expect(res).toEqual({ ok: true, result: null });
+    });
+  });
+
+  describe("listCloudflareZones", () => {
+    it("returns the account's zones (name + id)", async () => {
+      fetchSpy = mockFetch(() => ({
+        body: ok([{ id: "z1", name: "a.com" }, { id: "z2", name: "b.com" }]),
+      }));
+      vi.stubGlobal("fetch", fetchSpy);
+      const zones = await listCloudflareZones({ token: TOKEN });
+      expect(zones).toEqual([{ id: "z1", name: "a.com" }, { id: "z2", name: "b.com" }]);
+      expect(fetchSpy.mock.calls[0]![0]).toContain("/zones?per_page=50");
+    });
+
+    it("returns null when the call fails (so callers fall back to typing)", async () => {
+      fetchSpy = mockFetch(() => ({
+        status: 403,
+        body: { success: false, errors: [{ code: 9109, message: "bad token" }], result: null },
+      }));
+      vi.stubGlobal("fetch", fetchSpy);
+      expect(await listCloudflareZones({ token: TOKEN })).toBeNull();
     });
   });
 });

@@ -7,7 +7,9 @@ import type {
   EnvironmentKind,
 } from "./config.js";
 import type { DetectedApp, Detection } from "./detect.js";
+import { listCloudflareZones } from "./cloudflare.js";
 import { listFlyOrgs } from "./fly.js";
+import { readCredential, saveCredential } from "./secrets-file.js";
 import { pc } from "./util/log.js";
 
 /** Custom hostnames keyed by app name → environment. */
@@ -53,14 +55,11 @@ export async function buildConfig({
   detection,
   opts,
   flyReady = false,
-  cfReady = false,
 }: {
   detection: Detection;
   opts: InitOptions;
   /** Whether flyctl is authenticated — enables the org picker. */
   flyReady?: boolean;
-  /** Whether a CLOUDFLARE_API_TOKEN is present — enables custom-domain wiring. */
-  cfReady?: boolean;
 }) {
   const deployable = detection.apps.filter((a) => a.deployable);
 
@@ -75,7 +74,7 @@ export async function buildConfig({
   const provider = await pickProvider(opts, flyReady);
   if (!provider) return cancel();
 
-  const cf = await pickCloudflare({ apps: chosenApps, envs, cfReady });
+  const cf = await pickCloudflare({ apps: chosenApps, envs, cwd: opts.cwd });
   if (!cf) return cancel();
 
   noteSecrets(chosenApps);
@@ -192,19 +191,22 @@ async function typeOrg(opts: InitOptions): Promise<string | null> {
   return p.isCancel(org) ? null : org.trim();
 }
 
+const MANUAL_ZONE = "__manual_zone__";
+
 /**
- * Ask whether to wire custom domains through Cloudflare, and if so collect the
- * zone + a hostname per staging/production environment. Returns `{ hostnames }`
- * with no `cloudflare` when the user declines, or null on cancel.
+ * Ask whether to wire custom domains through Cloudflare, and if so resolve a
+ * token, pick the zone, and collect a hostname per staging/production
+ * environment. Returns `{ hostnames }` with no `cloudflare` when the user
+ * declines, or null on cancel.
  */
 async function pickCloudflare({
   apps,
   envs,
-  cfReady,
+  cwd,
 }: {
   apps: DetectedApp[];
   envs: EnvironmentKind[];
-  cfReady: boolean;
+  cwd: string;
 }): Promise<{ cloudflare?: CloudflareConfig; hostnames: HostMap } | null> {
   // Only staging/production get custom domains — previews stay on *.fly.dev.
   const domainKinds = (["staging", "production"] as const).filter((k) => envs.includes(k));
@@ -217,19 +219,16 @@ async function pickCloudflare({
   if (p.isCancel(enable)) return null;
   if (!enable) return { hostnames: {} };
 
-  if (!cfReady) {
+  const token = await resolveCloudflareToken(cwd);
+  if (token === null) return null; // cancelled
+  if (!token) {
     p.log.warn(
-      "CLOUDFLARE_API_TOKEN isn't set — deploykit will record the domains in the config, but you'll need the token exported to actually provision them.",
+      "No Cloudflare token — recording the domains in the config; provisioning is skipped until CLOUDFLARE_API_TOKEN is set.",
     );
   }
 
-  const zoneInput = await p.text({
-    message: "Cloudflare zone (root domain)",
-    placeholder: "example.com",
-    validate: (v) => (v.trim() ? undefined : "Required"),
-  });
-  if (p.isCancel(zoneInput)) return null;
-  const zone = zoneInput.trim();
+  const zone = await pickZone(token);
+  if (zone === null) return null;
 
   const hostnames: HostMap = {};
   for (const app of apps) {
@@ -256,6 +255,73 @@ async function pickCloudflare({
     cache: true,
   };
   return { cloudflare, hostnames };
+}
+
+/**
+ * Resolve a Cloudflare API token: env var → saved credentials file → masked
+ * prompt (offering to save it for next time). Returns the token, "" when the
+ * user opts to skip provisioning, or null on cancel. When found via file or
+ * prompt it's exported to the process so the provisioning step picks it up.
+ */
+async function resolveCloudflareToken(cwd: string): Promise<string | null> {
+  const fromEnv = process.env.CLOUDFLARE_API_TOKEN?.trim();
+  if (fromEnv) return fromEnv;
+
+  const fromFile = readCredential(cwd, "CLOUDFLARE_API_TOKEN");
+  if (fromFile) {
+    process.env.CLOUDFLARE_API_TOKEN = fromFile;
+    p.log.info("Using the Cloudflare token saved in .deploykit/credentials.");
+    return fromFile;
+  }
+
+  const pasted = await p.password({
+    message: "Cloudflare API token (blank to skip provisioning now)",
+  });
+  if (p.isCancel(pasted)) return null;
+  const token = pasted.trim();
+  if (!token) return "";
+
+  process.env.CLOUDFLARE_API_TOKEN = token;
+  const save = await p.confirm({
+    message: "Save this token to .deploykit/credentials (gitignored) for next time?",
+    initialValue: true,
+  });
+  if (!p.isCancel(save) && save) {
+    const res = saveCredential(cwd, "CLOUDFLARE_API_TOKEN", token);
+    p.log.success(pc.green(`Saved token → ${res.path}`));
+    if (!res.gitignored)
+      p.log.warn(`Add ${res.path} to .gitignore — couldn't do it automatically.`);
+  }
+  return token;
+}
+
+/**
+ * Pick the Cloudflare zone. With a token we list the account's zones for a
+ * select (mirrors the Fly org picker); otherwise fall back to typing.
+ */
+async function pickZone(token: string): Promise<string | null> {
+  const zones = token ? await listCloudflareZones({ token }) : null;
+  if (!zones || zones.length === 0) return typeZone();
+
+  const sel = await p.select({
+    message: "Cloudflare zone (root domain)",
+    options: [
+      ...zones.map((z) => ({ value: z.name, label: z.name })),
+      { value: MANUAL_ZONE, label: pc.dim("Enter a domain manually…") },
+    ],
+    initialValue: zones[0]?.name,
+  });
+  if (p.isCancel(sel)) return null;
+  return sel === MANUAL_ZONE ? typeZone() : sel;
+}
+
+async function typeZone(): Promise<string | null> {
+  const zoneInput = await p.text({
+    message: "Cloudflare zone (root domain)",
+    placeholder: "example.com",
+    validate: (v) => (v.trim() ? undefined : "Required"),
+  });
+  return p.isCancel(zoneInput) ? null : zoneInput.trim();
 }
 
 /** Surface detected secret names so the user knows what they'll need to set. */

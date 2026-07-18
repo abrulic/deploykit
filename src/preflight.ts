@@ -77,12 +77,9 @@ export async function preflight(cwd: string) {
     warnings,
   });
 
+  // Cloudflare token is resolved lazily during the domain step (env →
+  // .deploykit/credentials → prompt), so no startup warning here.
   const cfReady = Boolean(process.env.CLOUDFLARE_API_TOKEN?.trim());
-  if (!cfReady) {
-    warnings.push(
-      "CLOUDFLARE_API_TOKEN not set. Needed only for custom-domain / Cloudflare wiring.",
-    );
-  }
 
   return { ok: errors.length === 0, errors, warnings, ghReady, flyReady, cfReady };
 }

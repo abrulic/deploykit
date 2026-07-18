@@ -83,6 +83,25 @@ async function request<T>({
 }
 
 /**
+ * List every zone the token can see, for a pick-from-a-list prompt (mirrors the
+ * Fly org picker). Returns null when the call fails so callers fall back to a
+ * free-text zone entry.
+ */
+export async function listCloudflareZones({
+  token,
+}: {
+  token: string;
+}): Promise<CfZone[] | null> {
+  const res = await request<CfZone[]>({
+    token,
+    method: "GET",
+    path: "/zones?per_page=50",
+  });
+  if (!res.ok || !res.result) return null;
+  return res.result.map((z) => ({ id: z.id, name: z.name }));
+}
+
+/**
  * Look up a zone by exact name. Returns the zone when the token can see it
  * (this is the "you own/control the domain" check), null when it isn't found,
  * or an error detail when the API call itself failed.
