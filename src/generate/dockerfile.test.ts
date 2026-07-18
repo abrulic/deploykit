@@ -58,13 +58,22 @@ describe("generateDockerfile", () => {
     };
     const config: DeploykitConfig = { ...sampleConfig, installEnv: { LEFTHOOK: "0" } };
     const out = generateDockerfile({ name: "app", app, config });
-    expect(out).toContain("RUN LEFTHOOK=0 pnpm install --frozen-lockfile");
+    // Lefthook's `prepare` hook can't be neutralized by LEFTHOOK=0 (it shells
+    // out to git first), so lifecycle scripts are skipped on the install.
+    expect(out).toContain("RUN pnpm install --frozen-lockfile --ignore-scripts");
     // No prisma.config → the --schema flag is present.
     expect(out).toContain(
       'RUN cd packages/db && DATABASE_URL="postgresql://build:build@localhost:5432/build" pnpm exec prisma generate --schema ./prisma/schema.prisma',
     );
     // prisma generate must land before the build step.
     expect(out.indexOf("prisma generate")).toBeLessThan(out.indexOf("turbo run build"));
+  });
+
+  it("keeps husky surgical: env prefix, dependency scripts still run", () => {
+    const config: DeploykitConfig = { ...sampleConfig, installEnv: { HUSKY: "0" } };
+    const out = generateDockerfile({ name: "app", app: appWith("node-server"), config });
+    expect(out).toContain("RUN HUSKY=0 pnpm install --frozen-lockfile");
+    expect(out).not.toContain("--ignore-scripts");
   });
 
   it("honors an explicit startCommand for a server app", () => {

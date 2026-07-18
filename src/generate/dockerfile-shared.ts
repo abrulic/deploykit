@@ -64,18 +64,26 @@ export const serveModel = (app: AppConfig): ServeModel =>
     : "static");
 
 /**
- * The install command, prefixed with any env that neutralizes `prepare`
- * git-hook installers (LEFTHOOK=0 / HUSKY=0) that would otherwise fail without
- * `git` in the image.
+ * The install command, adjusted to neutralize `prepare` git-hook installers
+ * that would otherwise fail without `git` in the image.
+ *
+ * Husky honors `HUSKY=0` before touching git, so an env prefix suffices and
+ * dependency install-scripts still run. Lefthook resolves the git repository
+ * *before* honoring `LEFTHOOK=0`, so the env var can't stop `lefthook install`
+ * from crashing on the missing binary — for it we skip lifecycle scripts on the
+ * install instead (`--ignore-scripts`). Prisma generate and the build run as
+ * their own steps, so nothing needed at build time depends on those scripts.
  */
 export const installLine = (pm: PmCommands, config: DeploykitConfig) => {
-  const env = config.installEnv;
-  const prefix = env
+  const env = { ...config.installEnv };
+  const ignoreScripts = "LEFTHOOK" in env;
+  delete env.LEFTHOOK; // no-op at install time — dropped in favor of --ignore-scripts
+  const prefix = Object.keys(env).length
     ? `${Object.entries(env)
         .map(([k, v]) => `${k}=${v}`)
         .join(" ")} `
     : "";
-  return `${prefix}${pm.install}`;
+  return `${prefix}${pm.install}${ignoreScripts ? " --ignore-scripts" : ""}`;
 };
 
 /**

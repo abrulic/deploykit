@@ -84,7 +84,7 @@ describe("generateDockerfile (Nx, package-based / server model)", () => {
       app: serverApp,
       config: { ...pkgBasedConfig, installEnv: { LEFTHOOK: "0" } },
     });
-    expect(withEnv).toContain("RUN LEFTHOOK=0 pnpm install --frozen-lockfile");
+    expect(withEnv).toContain("RUN pnpm install --frozen-lockfile --ignore-scripts");
     expect(withEnv).toContain(
       'RUN cd packages/db && DATABASE_URL="postgresql://build:build@localhost:5432/build" pnpm exec prisma generate',
     );

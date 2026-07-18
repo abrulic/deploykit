@@ -152,9 +152,12 @@ export interface DeploykitConfig {
   /** Optional Cloudflare DNS/CDN wiring for custom domains. */
   cloudflare?: CloudflareConfig;
   /**
-   * Env vars prefixed onto the Dockerfile install step. Used to neutralize
-   * `prepare` git-hook installers that fail in the image (e.g. LEFTHOOK=0,
-   * HUSKY=0 — the hook binary needs `git`, which the slim image lacks).
+   * Signals for neutralizing `prepare` git-hook installers that fail in the
+   * image (the hook binary needs `git`, which the slim image lacks). `HUSKY=0`
+   * is emitted as an env prefix on the install step; `LEFTHOOK=0` marks a
+   * lefthook hook, which honors the var too late to help, so the install skips
+   * lifecycle scripts (`--ignore-scripts`) instead of prefixing it. See
+   * `installLine`.
    */
   installEnv?: Record<string, string>;
   /**
