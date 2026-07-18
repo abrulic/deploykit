@@ -129,7 +129,11 @@ export function secretNames(config: DeploykitConfig) {
 
 /** Where each configured environment's secrets live in GitHub. */
 export interface SecretTarget {
-  kind: EnvironmentKind;
+  /**
+   * The deploykit-managed environment kind, or undefined for a target that was
+   * only discovered on the repo (i.e. not one deploykit configured).
+   */
+  kind?: EnvironmentKind;
   /** GitHub environment name, or undefined for repo-level secrets. */
   env?: string;
   /** Short label for prompts/plan output. */
@@ -154,4 +158,29 @@ export function secretTargets(config: DeploykitConfig): SecretTarget[] {
   if (kinds.has("production"))
     targets.push({ kind: "production", env: "production", label: "production" });
   return targets;
+}
+
+/**
+ * Combine deploykit's configured secret targets with the environments that
+ * actually exist on the GitHub repo, so secrets can be set for environments a
+ * user created themselves (named anything) — not just the ones deploykit
+ * models. Configured targets come first (in their canonical order); any repo
+ * environment not already configured is appended (sorted) as a target with no
+ * `kind`, marking it as discovered rather than deploykit-managed. Falls back to
+ * just the configured targets when the repo's environments can't be read.
+ */
+export function mergeSecretTargets({
+  configTargets,
+  ghEnvs,
+}: {
+  configTargets: SecretTarget[];
+  ghEnvs: string[] | null;
+}): SecretTarget[] {
+  if (!ghEnvs || ghEnvs.length === 0) return configTargets;
+  const configured = new Set(configTargets.map((t) => t.env).filter(Boolean));
+  const extras = [...new Set(ghEnvs)]
+    .filter((name) => !configured.has(name))
+    .sort()
+    .map((name): SecretTarget => ({ env: name, label: name }));
+  return [...configTargets, ...extras];
 }

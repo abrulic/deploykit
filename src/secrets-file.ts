@@ -64,6 +64,59 @@ export function saveSecretsFile({
   return { path: SECRETS_FILE, gitignored: ensureGitignored(cwd, SECRETS_FILE) };
 }
 
+/**
+ * Reusable local credentials (e.g. CLOUDFLARE_API_TOKEN), kept separate from
+ * the throwaway secrets dump so a `saveSecretsFile` rewrite can't clobber them.
+ */
+export const CREDENTIALS_FILE = ".deploykit/credentials";
+
+/** Read a saved credential value from the local credentials file, or null. */
+export function readCredential(cwd: string, name: string): string | null {
+  let text: string;
+  try {
+    text = readFileSync(join(cwd, CREDENTIALS_FILE), "utf8");
+  } catch {
+    return null;
+  }
+  for (const line of text.split("\n")) {
+    const m = line.match(/^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*)$/);
+    if (m && m[1] === name) return unquote((m[2] ?? "").trim());
+  }
+  return null;
+}
+
+/** Upsert a credential into the gitignored, 0600 credentials file (other lines preserved). */
+export function saveCredential(cwd: string, name: string, value: string): SaveSecretsResult {
+  const abs = join(cwd, CREDENTIALS_FILE);
+  mkdirSync(dirname(abs), { recursive: true });
+
+  let existing = "";
+  try {
+    existing = readFileSync(abs, "utf8");
+  } catch {
+    /* new file */
+  }
+
+  const line = `${name}=${quote(value)}`;
+  const re = new RegExp(`^\\s*${name}\\s*=`);
+  const lines = existing ? existing.split("\n") : [];
+  let replaced = false;
+  const out = lines.map((l) => (re.test(l) ? ((replaced = true), line) : l));
+  if (!replaced) {
+    if (out.length === 0) out.push("# deploykit — LOCAL credentials, gitignored. Reused across runs.");
+    out.push(line);
+  }
+
+  writeFileSync(abs, `${out.join("\n").replace(/\n*$/, "")}\n`, { encoding: "utf8", mode: 0o600 });
+  try {
+    chmodSync(abs, 0o600);
+  } catch {
+    /* non-POSIX — perms are advisory */
+  }
+
+  return { path: CREDENTIALS_FILE, gitignored: ensureGitignored(cwd, CREDENTIALS_FILE) };
+}
+
 /** Add `entry` to .gitignore if it isn't already ignored. Returns success. */
 function ensureGitignored(cwd: string, entry: string): boolean {
   const path = join(cwd, ".gitignore");
@@ -96,4 +149,11 @@ function ensureGitignored(cwd: string, entry: string): boolean {
 /** Quote dotenv values that contain whitespace or comment/quote characters. */
 function quote(value: string) {
   return /[\s#"']/.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value;
+}
+
+/** Reverse of `quote` — strip surrounding double quotes and unescape. */
+function unquote(value: string) {
+  return value.length >= 2 && value.startsWith('"') && value.endsWith('"')
+    ? value.slice(1, -1).replace(/\\"/g, '"')
+    : value;
 }

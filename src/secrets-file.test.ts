@@ -1,7 +1,13 @@
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { SECRETS_FILE, saveSecretsFile } from "./secrets-file.js";
+import {
+  CREDENTIALS_FILE,
+  readCredential,
+  saveCredential,
+  SECRETS_FILE,
+  saveSecretsFile,
+} from "./secrets-file.js";
 import { writeTree } from "./testing/fixtures.js";
 
 describe("saveSecretsFile", () => {
@@ -64,5 +70,54 @@ describe("saveSecretsFile", () => {
     const text = readFileSync(join(root, ".gitignore"), "utf8");
     // Already ignored via the ".deploykit/" dir entry — no new line added.
     expect(text).toBe("node_modules\n.deploykit/\n");
+  });
+});
+
+describe("credentials file", () => {
+  const cleanups: Array<() => void> = [];
+  afterEach(() => {
+    for (const c of cleanups.splice(0)) c();
+  });
+  const setup = (files: Record<string, string> = {}) => {
+    const { root, cleanup } = writeTree({ files });
+    cleanups.push(cleanup);
+    return root;
+  };
+
+  it("saves and reads back a credential", () => {
+    const root = setup();
+    const res = saveCredential(root, "CLOUDFLARE_API_TOKEN", "tok_abc123");
+    expect(res.path).toBe(CREDENTIALS_FILE);
+    expect(readCredential(root, "CLOUDFLARE_API_TOKEN")).toBe("tok_abc123");
+  });
+
+  it("upserts an existing key without clobbering others", () => {
+    const root = setup();
+    saveCredential(root, "A", "1");
+    saveCredential(root, "B", "2");
+    saveCredential(root, "A", "3"); // update A only
+    expect(readCredential(root, "A")).toBe("3");
+    expect(readCredential(root, "B")).toBe("2");
+  });
+
+  it("returns null for a missing file or key", () => {
+    const root = setup();
+    expect(readCredential(root, "NOPE")).toBeNull();
+    saveCredential(root, "A", "1");
+    expect(readCredential(root, "NOPE")).toBeNull();
+  });
+
+  it("gitignores the credentials file with 0600 perms", () => {
+    const root = setup();
+    const res = saveCredential(root, "X", "y");
+    expect(res.gitignored).toBe(true);
+    expect(readFileSync(join(root, ".gitignore"), "utf8")).toContain(CREDENTIALS_FILE);
+    expect(statSync(join(root, CREDENTIALS_FILE)).mode & 0o777).toBe(0o600);
+  });
+
+  it("round-trips a value needing quotes", () => {
+    const root = setup();
+    saveCredential(root, "X", "has spaces");
+    expect(readCredential(root, "X")).toBe("has spaces");
   });
 });
