@@ -1,0 +1,41 @@
+name: Publish to npm
+
+on:
+  push:
+    branches: [main]
+
+# Never let two publishes run at once.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # to push the version-bump commit + tag back to main
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+
+      # Gate the publish on a green build.
+      - run: npm run typecheck
+      - run: npm test
+
+      - name: Bump version and publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          npm version patch -m "chore(release): v%s [skip ci]"
+          npm publish
+          git push --follow-tags
