@@ -1,5 +1,14 @@
 import type { DeploykitConfig, AppConfig } from "../config.js";
-import { PM, baseStage, fileHeader, nodeImage, runnerHeader } from "./dockerfile-shared.js";
+import {
+  PM,
+  baseStage,
+  fileHeader,
+  installLine,
+  nodeImage,
+  prismaSteps,
+  runnerHeader,
+  serveModel,
+} from "./dockerfile-shared.js";
 import type { GenerateAppFileInput } from "./types.js";
 
 /**
@@ -23,10 +32,10 @@ FROM base AS build
 WORKDIR /app
 # Lockfile + package manifests first for a cacheable install layer.
 COPY --from=prune /app/out/json/ .
-RUN ${pm.install}
+RUN ${installLine(pm, config)}
 # Then the pruned source, and build.
 COPY --from=prune /app/out/full/ .
-RUN ${pm.run} turbo run build --filter=${filter}
+${prismaSteps(app, pm)}RUN ${pm.run} turbo run build --filter=${filter}
 `;
 
   return head + "\n" + runner({ app, config }) + "\n";
@@ -50,23 +59,26 @@ CMD ["node", "${root}/server.js"]
 `;
   }
 
-  if (framework === "remix" || framework === "node-server") {
-    // Copy the built workspace and run the app's own start script.
+  if (serveModel(app) === "server") {
+    // Copy the built workspace and run the app's own start command (or the
+    // package manager's start script when no explicit command was detected).
+    const cmd = JSON.stringify(app.startCommand ?? pm.start);
     return `${header}
 
 COPY --from=build --chown=appuser:nodejs /app ./
 WORKDIR /app/${root}
 USER appuser
-CMD ${JSON.stringify(pm.start)}
+CMD ${cmd}
 `;
   }
 
   // static | vite | astro — serve the built output with a tiny static server.
-  const spa = framework === "vite" ? " -s" : "";
+  const dir = app.outputDir ?? `${root}/dist`;
+  const spa = app.spa ?? framework === "vite";
   return `${header}
 
 RUN npm install -g serve@14
-COPY --from=build --chown=appuser:nodejs /app/${root}/dist ./dist
+COPY --from=build --chown=appuser:nodejs /app/${dir} ./dist
 USER appuser
 CMD ["serve"${spa ? `, "-s"` : ""}, "-l", "${port}", "dist"]
 `;

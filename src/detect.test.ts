@@ -12,6 +12,22 @@ describe("detectFramework", () => {
     expect(detectFramework({ devDependencies: { vite: "5" } })).toBe("vite");
   });
 
+  it("detects React Router 7 framework mode via @react-router/dev", () => {
+    expect(
+      detectFramework({
+        dependencies: { "react-router": "7", "@react-router/serve": "7" },
+        devDependencies: { "@react-router/dev": "7", vite: "6" },
+      }),
+    ).toBe("react-router");
+  });
+
+  it("treats a plain SPA that only routes with react-router as vite", () => {
+    // `react-router` for client routing, but no framework dev plugin.
+    expect(
+      detectFramework({ dependencies: { "react-router": "7" }, devDependencies: { vite: "6" } }),
+    ).toBe("vite");
+  });
+
   it("prefers next over a bundled vite", () => {
     expect(
       detectFramework({ dependencies: { next: "14" }, devDependencies: { vite: "5" } }),
@@ -163,5 +179,119 @@ describe("detect (Nx)", () => {
     expect(api?.watchPaths).toContain("nx.json");
     expect(api?.secrets).toContain("API_KEY");
     expect(api?.secrets).toContain("SENTRY_DSN");
+  });
+});
+
+// A package-based Nx repo (nx.json but no project.json) mirroring the real
+// React Router 7 + Prisma + lefthook monorepo that motivated this detection.
+const RR7_MONOREPO = {
+  "nx.json": "{}",
+  "pnpm-workspace.yaml": "packages:\n  - 'test-apps/*'\n  - 'packages/*'\n",
+  "package.json": JSON.stringify({
+    name: "root",
+    packageManager: "pnpm@10.8.0",
+    engines: { node: ">=20.0.0" },
+    scripts: { prepare: "lefthook install" },
+    devDependencies: { lefthook: "^1.11.10" },
+  }),
+  "test-apps/storefront-app/package.json": JSON.stringify({
+    name: "storefront-app",
+    engines: { node: ">=22.0.0" },
+    scripts: { build: "react-router build", start: "react-router-serve ./build/server/index.js" },
+    dependencies: {
+      "react-router": "^7.5.0",
+      "@react-router/node": "^7.5.0",
+      "@react-router/serve": "^7.5.0",
+      "@ecommerce/database": "workspace:*",
+    },
+    devDependencies: { "@react-router/dev": "^7.5.0", vite: "^6.2.6" },
+  }),
+  "packages/database/package.json": JSON.stringify({
+    name: "@ecommerce/database",
+    dependencies: { "@prisma/client": "^7.7.0", prisma: "^7.7.0" },
+  }),
+  "packages/database/prisma.config.ts": "export default {}\n",
+  "packages/database/prisma/schema.prisma": "// schema\n",
+};
+
+describe("detect (React Router 7 / package-based Nx)", () => {
+  let cleanup = () => {};
+  afterEach(() => cleanup());
+
+  const run = () => {
+    const tree = writeTree({ files: RR7_MONOREPO });
+    cleanup = tree.cleanup;
+    return detect(tree.root);
+  };
+
+  it("classifies the RR7 app as a server, package-based", () => {
+    const result = run();
+    const app = result.apps.find((a) => a.name === "storefront-app");
+    expect(result.tool).toBe("nx");
+    expect(result.nxIntegrated).toBe(false);
+    expect(app?.framework).toBe("react-router");
+    expect(app?.serve).toBe("server");
+    // Clean `start` script → no explicit command (the runner uses `pnpm start`).
+    expect(app?.startCommand).toBeUndefined();
+  });
+
+  it("resolves the Node version from the app's engines, not just the root", () => {
+    expect(run().nodeVersion).toBe("22");
+  });
+
+  it("neutralizes the lefthook prepare hook via install env", () => {
+    expect(run().installEnv).toEqual({ LEFTHOOK: "0" });
+  });
+
+  it("assigns the Prisma package to the app that depends on it", () => {
+    const app = run().apps.find((a) => a.name === "storefront-app");
+    expect(app?.prisma).toEqual([
+      {
+        packageName: "@ecommerce/database",
+        root: "packages/database",
+        schema: "prisma/schema.prisma",
+        hasConfig: true,
+      },
+    ]);
+  });
+});
+
+describe("detect — serve model & install env variants", () => {
+  let cleanup = () => {};
+  afterEach(() => cleanup());
+
+  it("detects a React Router 7 SPA (ssr:false) as static", () => {
+    const tree = writeTree({
+      files: {
+        "turbo.json": "{}",
+        "pnpm-workspace.yaml": "packages:\n  - 'apps/*'\n",
+        "package.json": JSON.stringify({ name: "root", packageManager: "pnpm@10" }),
+        "apps/spa/package.json": JSON.stringify({
+          name: "@acme/spa",
+          scripts: { build: "react-router build" },
+          devDependencies: { "@react-router/dev": "7", vite: "6" },
+        }),
+        "apps/spa/react-router.config.ts": "export default { ssr: false }\n",
+      },
+    });
+    cleanup = tree.cleanup;
+    const app = detect(tree.root).apps.find((a) => a.name === "spa");
+    expect(app?.serve).toBe("static");
+    expect(app?.outputDir).toBe("apps/spa/build/client");
+    expect(app?.spa).toBe(true);
+  });
+
+  it("detects a husky prepare hook", () => {
+    const tree = writeTree({
+      files: {
+        "turbo.json": "{}",
+        "package.json": JSON.stringify({
+          name: "root",
+          scripts: { prepare: "husky" },
+        }),
+      },
+    });
+    cleanup = tree.cleanup;
+    expect(detect(tree.root).installEnv).toEqual({ HUSKY: "0" });
   });
 });

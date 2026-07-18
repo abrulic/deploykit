@@ -1,6 +1,12 @@
 import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import type { Framework, MonorepoTool, PackageManager } from "./config.js";
+import type {
+  Framework,
+  MonorepoTool,
+  PackageManager,
+  PrismaTarget,
+  ServeModel,
+} from "./config.js";
 import { DEFAULT_PORTS } from "./config.js";
 import {
   expandWorkspaceGlob,
@@ -35,6 +41,16 @@ export interface DetectedApp {
   root: string;
   packageName: string;
   framework: Framework;
+  /** How the runner serves this app (derived from framework + config files). */
+  serve: ServeModel;
+  /** Exec-form CMD for a server app; omitted → run the app's own start script. */
+  startCommand?: string[];
+  /** For static apps: the built directory to serve. */
+  outputDir?: string;
+  /** For static apps: serve with SPA history fallback. */
+  spa?: boolean;
+  /** Prisma packages in this app's dependency closure needing `prisma generate`. */
+  prisma?: PrismaTarget[];
   deployable: boolean;
   port: number;
   /** Transitive internal workspace deps (package names). */
@@ -59,6 +75,10 @@ export interface Detection {
   apps: DetectedApp[];
   libs: DetectedLib[];
   hasExistingWorkflows: boolean;
+  /** Env to neutralize `prepare` git-hook installers during the Docker install. */
+  installEnv?: Record<string, string>;
+  /** Nx only: true = integrated (project.json); false = package-based. */
+  nxIntegrated?: boolean;
 }
 
 interface Projects {
@@ -83,40 +103,77 @@ const ENV_DENYLIST = new Set([
   "HOSTNAME",
 ]);
 
-export function detect(cwd: string) {
+export function detect(cwd: string): Detection {
   const tool: MonorepoTool = fileExists(join(cwd, "turbo.json"))
     ? "turbo"
     : "nx";
   const packageManager = detectPackageManager(cwd);
-  const nodeVersion = detectNodeVersion(cwd);
 
-  const { apps, libs } = detectProjects({ cwd, tool });
+  const { apps, libs, nxIntegrated } = detectProjects({ cwd, tool, packageManager });
   apps.sort((a, b) => a.name.localeCompare(b.name));
   libs.sort((a, b) => a.name.localeCompare(b.name));
+
+  // Node version depends on the apps' own engines, so resolve it after detection.
+  const nodeVersion = detectNodeVersion({ cwd, appRoots: apps.map((a) => a.root) });
+
+  // Prisma: scan every package once, then assign each app the targets that fall
+  // inside its dependency closure (keeps `turbo prune` honest for multi-db repos).
+  const prismaTargets = detectPrismaTargets({
+    cwd,
+    roots: [...apps, ...libs].map((p) => ({ packageName: p.packageName, root: p.root })),
+  });
+  if (prismaTargets.length) {
+    for (const app of apps) {
+      const closure = new Set([app.packageName, ...app.internalDeps]);
+      const appPrisma = prismaTargets.filter((t) => closure.has(t.packageName));
+      if (appPrisma.length) app.prisma = appPrisma;
+    }
+  }
 
   const hasExistingWorkflows = listDir(join(cwd, ".github", "workflows")).some(
     (f) => f.endsWith(".yml") || f.endsWith(".yaml"),
   );
 
-  return { tool, packageManager, nodeVersion, apps, libs, hasExistingWorkflows };
+  const detection: Detection = {
+    tool,
+    packageManager,
+    nodeVersion,
+    apps,
+    libs,
+    hasExistingWorkflows,
+  };
+  const installEnv = detectInstallEnv(cwd);
+  if (installEnv) detection.installEnv = installEnv;
+  if (tool === "nx") detection.nxIntegrated = nxIntegrated;
+  return detection;
 }
 
-function detectProjects({ cwd, tool }: { cwd: string; tool: MonorepoTool }): Projects {
+function detectProjects({
+  cwd,
+  tool,
+  packageManager,
+}: {
+  cwd: string;
+  tool: MonorepoTool;
+  packageManager: PackageManager;
+}): Projects & { nxIntegrated: boolean } {
   if (tool === "nx") {
-    const nx = detectNxProjects({ cwd });
+    const nx = detectNxProjects({ cwd, packageManager });
     // Integrated Nx uses project.json; package-based Nx falls back to package.json.
-    if (nx.apps.length || nx.libs.length) return nx;
+    if (nx.apps.length || nx.libs.length) return { ...nx, nxIntegrated: true };
   }
-  return detectPackageProjects({ cwd, tool });
+  return { ...detectPackageProjects({ cwd, tool, packageManager }), nxIntegrated: false };
 }
 
 // ── Package-based detection (Turbo, or Nx with per-package package.json) ──────
 function detectPackageProjects({
   cwd,
   tool,
+  packageManager,
 }: {
   cwd: string;
   tool: MonorepoTool;
+  packageManager: PackageManager;
 }): Projects {
   const dirs = new Set<string>();
   for (const pattern of workspaceGlobs(cwd)) {
@@ -152,11 +209,22 @@ function detectPackageProjects({
       .map((n) => dirByName.get(n))
       .filter((d): d is string => Boolean(d));
 
+    const serveInfo = detectServeModel({
+      pkg: r.pkg,
+      framework,
+      appAbs: join(cwd, r.dir),
+      root: r.dir,
+      nxIntegrated: false,
+      tool,
+      packageManager,
+    });
+
     apps.push({
       name: lastSegment(r.dir),
       root: r.dir,
       packageName: r.name,
       framework,
+      ...serveInfo,
       deployable: true,
       port: DEFAULT_PORTS[framework],
       internalDeps,
@@ -176,7 +244,13 @@ function detectPackageProjects({
 }
 
 // ── Nx detection (integrated repos, via project.json) ────────────────────────
-function detectNxProjects({ cwd }: { cwd: string }): Projects {
+function detectNxProjects({
+  cwd,
+  packageManager,
+}: {
+  cwd: string;
+  packageManager: PackageManager;
+}): Projects {
   const projects = findFilesByName({ root: cwd, filename: "project.json", limit: 1000 })
     .map((file) => {
       const proj = readJson<NxProjectJson>(join(cwd, file));
@@ -204,11 +278,22 @@ function detectNxProjects({ cwd }: { cwd: string }): Projects {
       .map((d) => rootByName.get(d))
       .filter((d): d is string => Boolean(d));
 
+    const serveInfo = detectServeModel({
+      pkg: readJson<PackageJson>(join(cwd, root, "package.json")) ?? undefined,
+      framework,
+      appAbs: join(cwd, root),
+      root,
+      nxIntegrated: true,
+      tool: "nx",
+      packageManager,
+    });
+
     apps.push({
       name: lastSegment(root),
       root,
       packageName: name,
       framework,
+      ...serveInfo,
       deployable: true,
       port: DEFAULT_PORTS[framework],
       internalDeps,
@@ -285,16 +370,28 @@ function detectPackageManager(cwd: string): PackageManager {
   return "npm";
 }
 
-function detectNodeVersion(cwd: string) {
+/**
+ * Highest Node major any project asks for. Considers `.nvmrc`, the root
+ * `engines.node`, and every app's own `engines.node` — an app that needs Node
+ * 22 must not be built on the root's Node 20. Defaults to "20".
+ */
+function detectNodeVersion({ cwd, appRoots }: { cwd: string; appRoots: string[] }) {
+  const majors: number[] = [];
+
   const nvmrc = readText(join(cwd, ".nvmrc"));
   const fromNvmrc = nvmrc?.trim().replace(/^v/, "").match(/^(\d+)/)?.[1];
-  if (fromNvmrc) return fromNvmrc;
+  if (fromNvmrc) majors.push(Number(fromNvmrc));
 
-  const pkg = readJson<PackageJson>(join(cwd, "package.json"));
-  const fromEngines = pkg?.engines?.node?.match(/(\d+)/)?.[1];
-  if (fromEngines) return fromEngines;
+  const enginesMajor = (dir: string) =>
+    readJson<PackageJson>(join(dir, "package.json"))?.engines?.node?.match(/(\d+)/)?.[1];
+  const root = enginesMajor(cwd);
+  if (root) majors.push(Number(root));
+  for (const appRoot of appRoots) {
+    const m = enginesMajor(join(cwd, appRoot));
+    if (m) majors.push(Number(m));
+  }
 
-  return "20";
+  return majors.length ? String(Math.max(...majors)) : "20";
 }
 
 function workspaceGlobs(cwd: string) {
@@ -328,6 +425,9 @@ export function detectFramework(pkg: PackageJson): Framework | null {
 
   if (has("next")) return "next";
   if (hasPrefix("@remix-run/")) return "remix";
+  // React Router 7 framework mode is signalled by the dev plugin specifically
+  // (a plain SPA can depend on `react-router` for routing without it).
+  if (has("@react-router/dev")) return "react-router";
   if (has("astro")) return "astro";
   if (
     has("express") ||
@@ -339,6 +439,161 @@ export function detectFramework(pkg: PackageJson): Framework | null {
     return "node-server";
   if (has("vite")) return "vite";
   return null;
+}
+
+/** Per-package-manager prefix to run a locally-installed binary (resolves .bin). */
+const EXEC_PREFIX: Record<PackageManager, string[]> = {
+  pnpm: ["pnpm", "exec"],
+  npm: ["npx"],
+  yarn: ["yarn", "exec"],
+  bun: ["bunx"],
+};
+
+interface ServeInfo {
+  serve: ServeModel;
+  startCommand?: string[];
+  outputDir?: string;
+  spa?: boolean;
+}
+
+/**
+ * Decide how the runner serves an app — static files vs a long-running process —
+ * plus the served dir (static) or run command (server). Keyed off framework +
+ * a couple of config-file / dependency signals, NOT a hardcoded per-framework
+ * runner. `pkg`/`appAbs` may be absent for integrated-Nx apps with no package.json.
+ */
+function detectServeModel({
+  pkg,
+  framework,
+  appAbs,
+  root,
+  nxIntegrated,
+  tool,
+  packageManager,
+}: {
+  pkg?: PackageJson;
+  framework: Framework;
+  appAbs?: string;
+  root: string;
+  nxIntegrated: boolean;
+  tool: MonorepoTool;
+  packageManager: PackageManager;
+}): ServeInfo {
+  // Nx integrated writes to dist/<root>; turbo / package-based write in the pkg dir.
+  const staticBase = tool === "nx" && nxIntegrated ? `dist/${root}` : `${root}/dist`;
+  const deps = { ...(pkg?.dependencies ?? {}), ...(pkg?.devDependencies ?? {}) };
+  const server = (startCommand?: string[]): ServeInfo => ({ serve: "server", startCommand });
+
+  switch (framework) {
+    case "next":
+    case "remix":
+    case "node-server":
+      return server(resolveStartCommand({ pkg, framework, packageManager }));
+
+    case "react-router": {
+      // Framework mode: SSR by default; only `ssr:false` yields a static SPA.
+      if (reactRouterSsr(appAbs)) {
+        return server(resolveStartCommand({ pkg, framework, packageManager }));
+      }
+      return { serve: "static", outputDir: `${root}/build/client`, spa: true };
+    }
+
+    case "astro":
+      // A node adapter turns Astro into a server; otherwise it's a static site.
+      if (deps["@astrojs/node"]) {
+        return server(resolveStartCommand({ pkg, framework, packageManager }));
+      }
+      return { serve: "static", outputDir: staticBase, spa: false };
+
+    default:
+      // vite | static — a client-only SPA / static site.
+      return { serve: "static", outputDir: staticBase, spa: framework === "vite" };
+  }
+}
+
+/** True unless a react-router.config.{ts,js} explicitly sets `ssr: false`. */
+function reactRouterSsr(appAbs?: string): boolean {
+  if (!appAbs) return true;
+  const text =
+    readText(join(appAbs, "react-router.config.ts")) ??
+    readText(join(appAbs, "react-router.config.js"));
+  if (!text) return true; // no config → framework default is ssr: true
+  return !/\bssr\s*:\s*false\b/.test(text);
+}
+
+/**
+ * The run command for a server app, or undefined to let the runner invoke the
+ * app's own `start` script via the package manager. A clean single-command
+ * `start` is left to the package manager (it resolves node_modules/.bin). Only
+ * when `start` is container-hostile (env sourcing, chained `&&`) or missing do
+ * we synthesize a known-good command per framework.
+ */
+function resolveStartCommand({
+  pkg,
+  framework,
+  packageManager,
+}: {
+  pkg?: PackageJson;
+  framework: Framework;
+  packageManager: PackageManager;
+}): string[] | undefined {
+  const start = pkg?.scripts?.start?.trim();
+  if (start && isCleanStart(start)) return undefined; // runner uses `<pm> start`
+
+  const exec = EXEC_PREFIX[packageManager];
+  if (framework === "react-router")
+    return [...exec, "react-router-serve", "./build/server/index.js"];
+  if (framework === "astro") return ["node", "./dist/server/entry.mjs"];
+  return undefined; // best effort: runner falls back to `<pm> start`
+}
+
+/** A `start` script safe to run verbatim: no shell operators / env sourcing. */
+function isCleanStart(start: string): boolean {
+  return !/[&|;`$<>]|(^|\s)set\s+-a(\s|$)|(^|\s)source\s|(^|\s)\.\s/.test(start);
+}
+
+/**
+ * Workspace packages that ship a Prisma schema — their client isn't generated
+ * on install under pnpm 10 / Prisma 7, so the Dockerfile must run
+ * `prisma generate` before building. A package qualifies via a schema file, a
+ * prisma.config, or the `prisma` + `@prisma/client` dep pair.
+ */
+function detectPrismaTargets({
+  cwd,
+  roots,
+}: {
+  cwd: string;
+  roots: { packageName: string; root: string }[];
+}): PrismaTarget[] {
+  const targets: PrismaTarget[] = [];
+  for (const { packageName, root } of roots) {
+    const base = join(cwd, root);
+    const hasSchema = fileExists(join(base, "prisma", "schema.prisma"));
+    const hasConfig =
+      fileExists(join(base, "prisma.config.ts")) ||
+      fileExists(join(base, "prisma.config.js"));
+    const pkg = readJson<PackageJson>(join(base, "package.json"));
+    const deps = { ...(pkg?.dependencies ?? {}), ...(pkg?.devDependencies ?? {}) };
+    const hasDeps = Boolean(deps.prisma) && Boolean(deps["@prisma/client"]);
+    if (hasSchema || hasConfig || hasDeps) {
+      targets.push({ packageName, root, schema: "prisma/schema.prisma", hasConfig });
+    }
+  }
+  return targets;
+}
+
+/**
+ * Env that neutralizes a `prepare` git-hook installer during the Docker install.
+ * These hooks (lefthook/husky) shell out to `git`, which the slim image lacks
+ * and `.dockerignore` strips — so disable the installer rather than adding git.
+ */
+function detectInstallEnv(cwd: string): Record<string, string> | undefined {
+  const prepare = readJson<PackageJson>(join(cwd, "package.json"))?.scripts?.prepare;
+  if (!prepare) return undefined;
+  const env: Record<string, string> = {};
+  if (/lefthook/.test(prepare)) env.LEFTHOOK = "0";
+  if (/husky/.test(prepare)) env.HUSKY = "0";
+  return Object.keys(env).length ? env : undefined;
 }
 
 /** Transitive closure of internal deps, excluding the package itself. */

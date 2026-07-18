@@ -45,3 +45,59 @@ describe("generateDockerfile (Nx)", () => {
     expect(gen("vite")).toContain('"-s"');
   });
 });
+
+describe("generateDockerfile (Nx, package-based / server model)", () => {
+  const pkgBasedConfig: DeploykitConfig = { ...nxConfig, nxIntegrated: false };
+
+  const serverApp: AppConfig = {
+    root: "test-apps/storefront-app",
+    packageName: "storefront-app",
+    framework: "react-router",
+    serve: "server",
+    port: 3000,
+    internalDeps: ["@acme/db"],
+    watchPaths: [],
+    environments: {},
+    secrets: [],
+    prisma: [
+      { packageName: "@acme/db", root: "packages/db", schema: "prisma/schema.prisma", hasConfig: true },
+    ],
+  };
+
+  const out = generateDockerfile({ name: "storefront-app", app: serverApp, config: pkgBasedConfig });
+
+  it("ships the built workspace and runs the app's start script", () => {
+    expect(out).toContain("COPY --from=build --chown=appuser:nodejs /app ./");
+    expect(out).toContain("WORKDIR /app/test-apps/storefront-app");
+    expect(out).toContain('CMD ["pnpm","start"]');
+    expect(out).not.toContain("main.js");
+  });
+
+  it("drops --configuration=production for package-based Nx", () => {
+    expect(out).toContain("nx build storefront-app\n");
+    expect(out).not.toContain("--configuration=production");
+  });
+
+  it("neutralizes the prepare hook and generates the Prisma client", () => {
+    const withEnv = generateDockerfile({
+      name: "storefront-app",
+      app: serverApp,
+      config: { ...pkgBasedConfig, installEnv: { LEFTHOOK: "0" } },
+    });
+    expect(withEnv).toContain("RUN LEFTHOOK=0 pnpm install --frozen-lockfile");
+    expect(withEnv).toContain(
+      'RUN cd packages/db && DATABASE_URL="postgresql://build:build@localhost:5432/build" pnpm exec prisma generate',
+    );
+    // hasConfig → no --schema flag.
+    expect(withEnv).not.toContain("--schema");
+  });
+
+  it("honors an explicit startCommand over the package manager's start", () => {
+    const withCmd = generateDockerfile({
+      name: "storefront-app",
+      app: { ...serverApp, startCommand: ["node", "./build/server/index.js"] },
+      config: pkgBasedConfig,
+    });
+    expect(withCmd).toContain('CMD ["node","./build/server/index.js"]');
+  });
+});

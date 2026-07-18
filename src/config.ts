@@ -8,14 +8,38 @@
 export type MonorepoTool = "turbo" | "nx";
 export type PackageManager = "pnpm" | "yarn" | "npm" | "bun";
 
-/** How an app is built and served. Drives the runner stage of the Dockerfile. */
+/**
+ * The app's framework. A detection *hint* (drives DEFAULT_PORTS, the Next
+ * special-case, and the plan label) — the Dockerfile runner branches on
+ * `AppConfig.serve`, not on this.
+ */
 export type Framework =
   | "next"
   | "remix"
+  | "react-router"
   | "astro"
   | "vite"
   | "node-server"
   | "static";
+
+/** How the runner stage serves the app. Decoupled from `Framework`. */
+export type ServeModel = "static" | "server";
+
+/**
+ * A workspace package that ships a Prisma schema. Its client isn't generated on
+ * install under pnpm 10 / Prisma 7, so the Dockerfile runs `prisma generate`
+ * before the build for every such package in an app's dependency closure.
+ */
+export interface PrismaTarget {
+  /** Package name, used as the `--filter` / run target. */
+  packageName: string;
+  /** Workspace-relative package dir, e.g. "packages/database". */
+  root: string;
+  /** Schema path relative to the package root, e.g. "prisma/schema.prisma". */
+  schema: string;
+  /** True when the package has a prisma.config.{ts,js} (then `--schema` is omitted). */
+  hasConfig: boolean;
+}
 
 export type EnvironmentKind = "preview" | "staging" | "production";
 
@@ -76,6 +100,30 @@ export interface AppConfig {
   /** name field from the app's package.json. */
   packageName: string;
   framework: Framework;
+  /**
+   * How the runner serves the app: "server" runs a long-running process (SSR,
+   * node server); "static" serves the built files. Omitted on configs generated
+   * before this field existed — generators then fall back to the framework.
+   */
+  serve?: ServeModel;
+  /**
+   * Exec-form CMD for a server app, e.g. ["node", "dist/server.js"]. Omitted for
+   * the common case, where the runner runs the app's own `start` script via the
+   * package manager (which resolves node_modules/.bin and honors the script).
+   */
+  startCommand?: string[];
+  /**
+   * For static apps: the directory (relative to /app in the build stage) whose
+   * contents are served. Omitted → derived from the tool + framework.
+   */
+  outputDir?: string;
+  /** For static apps: serve with SPA history fallback (`serve -s`). */
+  spa?: boolean;
+  /**
+   * Prisma packages in this app's dependency closure whose client must be
+   * generated at build time. Empty/omitted when the app uses no Prisma.
+   */
+  prisma?: PrismaTarget[];
   /** Internal port the server listens on inside the container. */
   port: number;
   /** Names of internal workspace packages this app depends on. */
@@ -103,6 +151,18 @@ export interface DeploykitConfig {
   apps: Record<string, AppConfig>;
   /** Optional Cloudflare DNS/CDN wiring for custom domains. */
   cloudflare?: CloudflareConfig;
+  /**
+   * Env vars prefixed onto the Dockerfile install step. Used to neutralize
+   * `prepare` git-hook installers that fail in the image (e.g. LEFTHOOK=0,
+   * HUSKY=0 — the hook binary needs `git`, which the slim image lacks).
+   */
+  installEnv?: Record<string, string>;
+  /**
+   * Nx only: true = integrated repo (project.json, outputs at dist/<root>);
+   * false = package-based (per-package package.json, outputs in the package
+   * dir). Omitted → treated as integrated for backward compatibility.
+   */
+  nxIntegrated?: boolean;
 }
 
 /** Identity helper re-exported into the generated config for editor types. */
@@ -111,6 +171,7 @@ export const defineConfig = (config: DeploykitConfig) => config;
 export const DEFAULT_PORTS: Record<Framework, number> = {
   next: 3000,
   remix: 3000,
+  "react-router": 3000,
   astro: 4321,
   vite: 4173,
   "node-server": 8080,

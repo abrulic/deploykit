@@ -1,15 +1,28 @@
 import type { AppConfig, DeploykitConfig } from "../config.js";
-import { PM, baseStage, fileHeader, nodeImage, runnerHeader } from "./dockerfile-shared.js";
+import {
+  PM,
+  baseStage,
+  fileHeader,
+  installLine,
+  nodeImage,
+  prismaSteps,
+  runnerHeader,
+  serveModel,
+} from "./dockerfile-shared.js";
 import type { GenerateAppFileInput } from "./types.js";
 
 /**
  * Nx Dockerfile. Nx has no `turbo prune`, so we build the whole workspace and
- * copy the app's build output. Nx's default outputPath is `dist/<projectRoot>`;
- * if you've customized `outputPath`, adjust the copy paths below.
+ * either copy the app's build output (static / integrated bundle) or ship the
+ * built workspace and run the app's start command (SSR / server).
  */
 export function nxDockerfile({ app, config }: GenerateAppFileInput) {
   const pm = PM[config.packageManager];
   const project = app.packageName; // the Nx project name (`nx build <project>`)
+  // Package-based Nx targets are plain package.json scripts with no
+  // `production` configuration — only integrated (project.json) repos have one.
+  const integrated = config.nxIntegrated ?? true;
+  const productionFlag = integrated ? " --configuration=production" : "";
 
   const head = `${fileHeader({ root: app.root, base: baseStage(config) })}
 
@@ -17,8 +30,8 @@ export function nxDockerfile({ app, config }: GenerateAppFileInput) {
 FROM base AS build
 WORKDIR /app
 COPY . .
-RUN ${pm.install}
-RUN ${pm.run} nx build ${project} --configuration=production
+RUN ${installLine(pm, config)}
+${prismaSteps(app, pm)}RUN ${pm.run} nx build ${project}${productionFlag}
 `;
 
   return head + "\n" + runner({ app, config }) + "\n";
@@ -28,7 +41,8 @@ function runner({ app, config }: { app: AppConfig; config: DeploykitConfig }) {
   const node = nodeImage(config);
   const pm = PM[config.packageManager];
   const { root, port, framework } = app;
-  const out = `dist/${root}`; // Nx default output location
+  const integrated = config.nxIntegrated ?? true;
+  const out = `dist/${root}`; // Nx default output location (integrated)
   const header = runnerHeader({ node, port });
 
   if (framework === "next") {
@@ -44,23 +58,39 @@ CMD ["node", "server.js"]
 `;
   }
 
-  if (framework === "remix" || framework === "node-server") {
-    // Nx bundles the server + a pruned package.json into the output dir.
-    return `${header}
+  if (serveModel(app) === "server") {
+    // Integrated Nx bundles the server + a pruned package.json to dist/<root>,
+    // so ship just that and run it — the lean path for @nx/esbuild|webpack apps.
+    if (integrated && !app.startCommand && (framework === "remix" || framework === "node-server")) {
+      return `${header}
 
 COPY --from=build --chown=appuser:nodejs /app/${out} ./
 RUN ${pm.installProd}
 USER appuser
 CMD ["node", "main.js"]
 `;
+    }
+    // General server (SSR frameworks, package-based Nx, or an explicit command):
+    // ship the built workspace and run the app's own start command. Copying the
+    // whole workspace is robust to whatever layout the framework emits.
+    const cmd = JSON.stringify(app.startCommand ?? pm.start);
+    return `${header}
+
+# SSR / server runtime — copy the built workspace and run the app's start command.
+COPY --from=build --chown=appuser:nodejs /app ./
+WORKDIR /app/${root}
+USER appuser
+CMD ${cmd}
+`;
   }
 
-  // static | vite | astro — serve the built output with a tiny static server.
-  const spa = framework === "vite" ? " -s" : "";
+  // static — serve the built output with a tiny static server.
+  const dir = app.outputDir ?? (integrated ? out : `${root}/dist`);
+  const spa = app.spa ?? framework === "vite";
   return `${header}
 
 RUN npm install -g serve@14
-COPY --from=build --chown=appuser:nodejs /app/${out} ./dist
+COPY --from=build --chown=appuser:nodejs /app/${dir} ./dist
 USER appuser
 CMD ["serve"${spa ? `, "-s"` : ""}, "-l", "${port}", "dist"]
 `;

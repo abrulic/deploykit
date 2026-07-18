@@ -1,8 +1,10 @@
-import type { DeploykitConfig, PackageManager } from "../config.js";
+import type { AppConfig, DeploykitConfig, PackageManager, ServeModel } from "../config.js";
 
 export interface PmCommands {
   /** Run a locally-installed binary: pnpm | npx | yarn | bunx. */
   run: string;
+  /** Run a package's own binary, resolving node_modules/.bin (`pnpm exec`, `npx`). */
+  exec: string;
   /** Fetch and run a binary without a prior install (e.g. `turbo prune`). */
   dlx: string;
   /** Frozen install from the lockfile. */
@@ -16,6 +18,7 @@ export interface PmCommands {
 export const PM: Record<PackageManager, PmCommands> = {
   pnpm: {
     run: "pnpm",
+    exec: "pnpm exec",
     dlx: "pnpm dlx",
     install: "pnpm install --frozen-lockfile",
     installProd: "pnpm install --prod",
@@ -23,6 +26,7 @@ export const PM: Record<PackageManager, PmCommands> = {
   },
   npm: {
     run: "npx",
+    exec: "npx",
     dlx: "npx --yes",
     install: "npm install",
     installProd: "npm install --omit=dev",
@@ -30,6 +34,7 @@ export const PM: Record<PackageManager, PmCommands> = {
   },
   yarn: {
     run: "yarn",
+    exec: "yarn exec",
     dlx: "yarn dlx",
     install: "yarn install --frozen-lockfile",
     installProd: "yarn install --production",
@@ -37,11 +42,58 @@ export const PM: Record<PackageManager, PmCommands> = {
   },
   bun: {
     run: "bunx",
+    exec: "bunx",
     dlx: "bunx",
     install: "bun install",
     installProd: "bun install --production",
     start: ["bun", "start"],
   },
+};
+
+/**
+ * How the runner serves an app. Prefers the detected `serve` field; falls back
+ * to the framework for configs generated before that field existed.
+ */
+export const serveModel = (app: AppConfig): ServeModel =>
+  app.serve ??
+  (app.framework === "next" ||
+  app.framework === "remix" ||
+  app.framework === "react-router" ||
+  app.framework === "node-server"
+    ? "server"
+    : "static");
+
+/**
+ * The install command, prefixed with any env that neutralizes `prepare`
+ * git-hook installers (LEFTHOOK=0 / HUSKY=0) that would otherwise fail without
+ * `git` in the image.
+ */
+export const installLine = (pm: PmCommands, config: DeploykitConfig) => {
+  const env = config.installEnv;
+  const prefix = env
+    ? `${Object.entries(env)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(" ")} `
+    : "";
+  return `${prefix}${pm.install}`;
+};
+
+/**
+ * `prisma generate` lines for every Prisma package in the app's closure. The
+ * client isn't generated on install under pnpm 10 / Prisma 7, and workspace
+ * packages fail to build without it. A throwaway build-time DATABASE_URL is set
+ * because Prisma 7's config/adapters may read it at load (generate never connects).
+ */
+export const prismaSteps = (app: AppConfig, pm: PmCommands): string => {
+  const targets = app.prisma ?? [];
+  if (targets.length === 0) return "";
+  const url = "postgresql://build:build@localhost:5432/build";
+  return `${targets
+    .map((t) => {
+      const schema = t.hasConfig ? "" : ` --schema ./${t.schema}`;
+      return `RUN cd ${t.root} && DATABASE_URL="${url}" ${pm.exec} prisma generate${schema}`;
+    })
+    .join("\n")}\n`;
 };
 
 export const nodeImage = (config: DeploykitConfig) =>

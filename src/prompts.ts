@@ -118,7 +118,7 @@ async function pickApps(deployable: DetectedApp[]) {
     message: "Which apps should deploykit deploy?",
     options: deployable.map((a) => ({
       value: a.name,
-      label: `${a.name} ${pc.dim(`(${a.framework}, port ${a.port})`)}`,
+      label: `${a.name} ${pc.dim(`(${a.framework} · ${a.serve}, port ${a.port})`)}`,
       hint: a.root,
     })),
     initialValues: deployable.map((a) => a.name),
@@ -363,6 +363,8 @@ function assemble({
     apps: appMap,
   };
   if (cloudflare) config.cloudflare = cloudflare;
+  if (detection.installEnv) config.installEnv = detection.installEnv;
+  if (detection.nxIntegrated !== undefined) config.nxIntegrated = detection.nxIntegrated;
   return config;
 }
 
@@ -383,16 +385,24 @@ function appConfigFor({
   if (envs.includes("production"))
     environments.production = withHost({ name: `${app.name}-prod`, trigger: "manual" }, hosts?.production);
 
-  return {
+  const config: AppConfig = {
     root: app.root,
     packageName: app.packageName,
     framework: app.framework,
+    serve: app.serve,
     port: app.port,
     internalDeps: app.internalDeps,
     watchPaths: app.watchPaths,
     environments,
     secrets: app.secrets,
-  } satisfies AppConfig;
+  };
+  // Only persist the runner-shaping fields when they carry information, so the
+  // generated config stays minimal for the common case.
+  if (app.startCommand) config.startCommand = app.startCommand;
+  if (app.outputDir) config.outputDir = app.outputDir;
+  if (app.spa) config.spa = true;
+  if (app.prisma?.length) config.prisma = app.prisma;
+  return config;
 }
 
 const withHost = (env: AppEnvironment, hostname?: string): AppEnvironment =>

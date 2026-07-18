@@ -7,6 +7,7 @@ const app: DetectedApp = {
   root: "apps/web",
   packageName: "@acme/web",
   framework: "next",
+  serve: "server",
   deployable: true,
   port: 3000,
   internalDeps: ["@acme/ui"],
@@ -75,5 +76,37 @@ describe("buildConfig (non-interactive)", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const config = await buildConfig({ detection, opts: baseOpts });
     expect(config).toBeNull();
+  });
+
+  it("threads serve model, prisma, install-env and nxIntegrated into the config", async () => {
+    const ssrApp: DetectedApp = {
+      ...app,
+      framework: "react-router",
+      serve: "server",
+      prisma: [
+        { packageName: "@acme/db", root: "packages/db", schema: "prisma/schema.prisma", hasConfig: true },
+      ],
+    };
+    const nxDetection: Detection = {
+      ...detection,
+      tool: "nx",
+      nxIntegrated: false,
+      installEnv: { LEFTHOOK: "0" },
+      apps: [ssrApp],
+    };
+    const config = await buildConfig({ detection: nxDetection, opts: { ...baseOpts, org: "acme" } });
+    expect(config?.installEnv).toEqual({ LEFTHOOK: "0" });
+    expect(config?.nxIntegrated).toBe(false);
+    expect(config?.apps.web?.serve).toBe("server");
+    expect(config?.apps.web?.prisma).toHaveLength(1);
+  });
+
+  it("omits runner-shaping fields when they carry no information", async () => {
+    const config = await buildConfig({ detection, opts: { ...baseOpts, org: "acme" } });
+    // A plain turbo repo: no install-env, no nxIntegrated, no prisma on the app.
+    expect(config?.installEnv).toBeUndefined();
+    expect(config?.nxIntegrated).toBeUndefined();
+    expect(config?.apps.web).not.toHaveProperty("prisma");
+    expect(config?.apps.web).not.toHaveProperty("startCommand");
   });
 });
