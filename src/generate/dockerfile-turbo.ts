@@ -8,6 +8,7 @@ import {
   prismaSteps,
   runnerHeader,
   serveModel,
+  serverCmd,
 } from "./dockerfile-shared.js";
 import type { GenerateAppFileInput } from "./types.js";
 
@@ -43,7 +44,6 @@ ${prismaSteps(app, pm)}RUN ${pm.run} turbo run build --filter=${filter}
 
 function runner({ app, config }: { app: AppConfig; config: DeploykitConfig }) {
   const node = nodeImage(config);
-  const pm = PM[config.packageManager];
   const { root, port, framework } = app;
   const header = runnerHeader({ node, port });
 
@@ -60,9 +60,9 @@ CMD ["node", "${root}/server.js"]
   }
 
   if (serveModel(app) === "server") {
-    // Copy the built workspace and run the app's own start command (or the
-    // package manager's start script when no explicit command was detected).
-    const cmd = JSON.stringify(app.startCommand ?? pm.start);
+    // Copy the built workspace and run the app's own start command (or `npm
+    // start` when no explicit command was detected — see serverCmd).
+    const cmd = serverCmd(app);
     return `${header}
 
 COPY --from=build --chown=appuser:nodejs /app ./

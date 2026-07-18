@@ -11,8 +11,6 @@ export interface PmCommands {
   install: string;
   /** Production-only install (no lockfile assumed — used on pruned output). */
   installProd: string;
-  /** Start command for a long-running server app. */
-  start: string[];
 }
 
 export const PM: Record<PackageManager, PmCommands> = {
@@ -22,7 +20,6 @@ export const PM: Record<PackageManager, PmCommands> = {
     dlx: "pnpm dlx",
     install: "pnpm install --frozen-lockfile",
     installProd: "pnpm install --prod",
-    start: ["pnpm", "start"],
   },
   npm: {
     run: "npx",
@@ -30,7 +27,6 @@ export const PM: Record<PackageManager, PmCommands> = {
     dlx: "npx --yes",
     install: "npm install",
     installProd: "npm install --omit=dev",
-    start: ["npm", "start"],
   },
   yarn: {
     run: "yarn",
@@ -38,7 +34,6 @@ export const PM: Record<PackageManager, PmCommands> = {
     dlx: "yarn dlx",
     install: "yarn install --frozen-lockfile",
     installProd: "yarn install --production",
-    start: ["yarn", "start"],
   },
   bun: {
     run: "bunx",
@@ -46,7 +41,6 @@ export const PM: Record<PackageManager, PmCommands> = {
     dlx: "bunx",
     install: "bun install",
     installProd: "bun install --production",
-    start: ["bun", "start"],
   },
 };
 
@@ -103,6 +97,17 @@ export const prismaSteps = (app: AppConfig, pm: PmCommands): string => {
     })
     .join("\n")}\n`;
 };
+
+/**
+ * The runner CMD for a server app. Prefers the detected start command; falls
+ * back to `npm start`, which runs the app's own `start` script. The runner is a
+ * bare node image without the project's package manager (pnpm/yarn/bun), so we
+ * can't use `<pm> start` there — but `npm`/`npx` ship with every node image, and
+ * `npm start` runs a `start` script with `node_modules/.bin` on PATH regardless
+ * of which manager built the workspace.
+ */
+export const serverCmd = (app: AppConfig): string =>
+  JSON.stringify(app.startCommand ?? ["npm", "start"]);
 
 export const nodeImage = (config: DeploykitConfig) =>
   `node:${config.nodeVersion}-slim`;
