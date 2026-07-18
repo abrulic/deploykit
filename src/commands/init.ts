@@ -17,6 +17,7 @@ import {
   setGithubSecret,
   type StepResult,
 } from "../provision.js";
+import { provisionCloudflare, domainTargets } from "../provision-cloudflare.js";
 import { buildConfig, type InitOptions } from "../prompts.js";
 import { saveSecretsFile, type SecretGroup } from "../secrets-file.js";
 import { pc } from "../util/log.js";
@@ -51,7 +52,12 @@ export async function runInit(opts: InitOptions) {
   );
 
   // ── Phase 2: ask ──
-  const config = await buildConfig({ detection, opts, flyReady: pre.flyReady });
+  const config = await buildConfig({
+    detection,
+    opts,
+    flyReady: pre.flyReady,
+    cfReady: pre.cfReady,
+  });
   if (!config) return 1; // cancelled or missing org
 
   // ── Phase 3: plan ──
@@ -126,11 +132,67 @@ async function runProvisioning({
   }
 
   await provisionFlyApps({ config, opts, flyReady });
+  // Cloudflare certs need the Fly apps to exist first, so this runs after.
+  await provisionCloudflareStep({ config, opts, flyReady });
   if (flyReady && repo) await provisionFlyToken({ config, opts, repo, capture });
   if (repo) await provisionEnvironments({ config, opts, repo });
   if (repo) await provisionSecrets({ config, opts, repo, capture });
 
   await maybeSaveSecrets({ opts, captured });
+}
+
+/**
+ * Verify the Cloudflare zone, issue Fly certs for each custom hostname, and
+ * wire the DNS records + zone settings. No-op unless the config has a
+ * `cloudflare` block; skips (with a warning) without a token or flyctl auth.
+ */
+async function provisionCloudflareStep({
+  config,
+  opts,
+  flyReady,
+}: {
+  config: DeploykitConfig;
+  opts: InitOptions;
+  flyReady: boolean;
+}) {
+  const cf = config.cloudflare;
+  if (!cf) return;
+
+  const token = process.env.CLOUDFLARE_API_TOKEN?.trim();
+  if (!token) {
+    p.log.warn("Skipping Cloudflare — CLOUDFLARE_API_TOKEN is not set.");
+    return;
+  }
+  if (!flyReady) {
+    p.log.warn("Skipping Cloudflare — flyctl isn't authenticated (needed to issue Fly certs).");
+    return;
+  }
+  const targets = domainTargets(config);
+  if (targets.length === 0) return;
+
+  if (
+    !(await confirm({
+      opts,
+      message: `Wire ${targets.length} custom domain(s) through Cloudflare (zone ${cf.zone})?`,
+    }))
+  ) {
+    return;
+  }
+
+  const s = p.spinner();
+  s.start("Provisioning Cloudflare (certs, DNS, settings)");
+  const results = await provisionCloudflare({ config, token, cwd: opts.cwd });
+  const failed = results.filter((r) => !r.ok);
+  s.stop(
+    failed.length
+      ? pc.yellow("Cloudflare — some steps need attention:")
+      : pc.green("Cloudflare configured"),
+  );
+  for (const r of results) {
+    if (!r.ok) p.log.error(`${r.label}: ${r.detail ?? "failed"}`);
+    else if (r.detail) p.log.warn(`${r.label} ${pc.dim(`(${r.detail})`)}`);
+    else p.log.success(pc.green(r.label));
+  }
 }
 
 /** Create the staging/production Fly apps that don't exist yet. */

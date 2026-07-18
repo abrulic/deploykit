@@ -12,6 +12,8 @@ export interface PreflightResult {
   ghReady: boolean;
   /** Whether `flyctl` is authenticated (needed for --provision). */
   flyReady: boolean;
+  /** Whether a CLOUDFLARE_API_TOKEN is present (needed for custom-domain wiring). */
+  cfReady: boolean;
 }
 
 /**
@@ -75,7 +77,14 @@ export async function preflight(cwd: string) {
     warnings,
   });
 
-  return { ok: errors.length === 0, errors, warnings, ghReady, flyReady };
+  const cfReady = Boolean(process.env.CLOUDFLARE_API_TOKEN?.trim());
+  if (!cfReady) {
+    warnings.push(
+      "CLOUDFLARE_API_TOKEN not set. Needed only for custom-domain / Cloudflare wiring.",
+    );
+  }
+
+  return { ok: errors.length === 0, errors, warnings, ghReady, flyReady, cfReady };
 }
 
 interface CheckAuthInput {
