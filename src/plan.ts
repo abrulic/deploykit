@@ -45,9 +45,9 @@ export function renderPlan({ config, files, opts }: RenderPlanInput) {
   lines.push("");
   lines.push(pc.bold("Provisioning"));
   if (willProvision) {
-    lines.push(pc.dim(opts.yes ? "  (auto)" : "  (offered next — confirm each step)"));
+    lines.push(pc.dim(opts.yes ? "  (auto)" : "  (offered next — confirm each step; existing resources are skipped)"));
     lines.push(`  Create Fly apps: ${flyApps.join(", ")}`);
-    lines.push(`  Set GitHub secret: FLY_API_TOKEN`);
+    lines.push(`  Create Fly deploy token → set FLY_API_TOKEN ${pc.dim("(shows under Fly → Tokens)")}`);
     if (hasEnv({ config, kind: "staging" }))
       lines.push(`  Create GitHub environment: staging`);
     if (hasEnv({ config, kind: "production" }))
