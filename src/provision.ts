@@ -59,6 +59,67 @@ export async function createFlyApps({
   return results;
 }
 
+/** Resolve the current repo as "owner/name", or null if gh can't determine it. */
+export async function getRepo(cwd: string) {
+  return tryExec({
+    cmd: "gh",
+    args: ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+    cwd,
+  });
+}
+
+/**
+ * Set a single GitHub Actions secret. When `env` is given it's scoped to that
+ * deployment environment (`gh secret set --env`); otherwise it's a repo-level
+ * secret. Repo-level is what the preview job reads (it has no `environment:`),
+ * while staging/production jobs read their environment secrets.
+ */
+export async function setGithubSecret({
+  name,
+  value,
+  env,
+  repo,
+  cwd,
+}: {
+  name: string;
+  value: string;
+  env?: string;
+  repo?: string | null;
+  cwd: string;
+}) {
+  const args = ["secret", "set", name, "--body", value];
+  if (env) args.push("--env", env);
+  if (repo) args.push("--repo", repo);
+  const res = await exec({ cmd: "gh", args, cwd });
+  const scope = env ? ` → ${env}` : " → repo";
+  return {
+    label: `Set secret ${name}${scope}`,
+    ok: res.code === 0,
+    detail: res.code === 0 ? undefined : res.stderr.trim(),
+  } satisfies StepResult;
+}
+
+/**
+ * Ensure a single GitHub deployment environment exists (idempotent PUT). Env
+ * secrets can't be set until the environment exists, so this runs first.
+ */
+export async function ensureGithubEnvironment({
+  env,
+  repo,
+  cwd,
+}: {
+  env: string;
+  repo: string;
+  cwd: string;
+}) {
+  const res = await exec({
+    cmd: "gh",
+    args: ["api", "--method", "PUT", `/repos/${repo}/environments/${env}`],
+    cwd,
+  });
+  return res.code === 0;
+}
+
 /** Create GitHub deployment environments so staging/production gates work. */
 export async function createGithubEnvironments({
   config,
@@ -67,11 +128,7 @@ export async function createGithubEnvironments({
   config: DeploykitConfig;
   cwd: string;
 }) {
-  const repo = await tryExec({
-    cmd: "gh",
-    args: ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
-    cwd,
-  });
+  const repo = await getRepo(cwd);
   if (!repo) {
     return [
       {

@@ -1,4 +1,4 @@
-import type { DeploykitConfig } from "./config.js";
+import type { DeploykitConfig, EnvironmentKind } from "./config.js";
 import type { GeneratedFile } from "./generate/index.js";
 import type { InitOptions } from "./prompts.js";
 import { pc } from "./util/log.js";
@@ -41,15 +41,20 @@ export function renderPlan({ config, files, opts }: RenderPlanInput) {
   );
 
   const flyApps = flyAppNames(config);
+  const willProvision = !opts.yes || opts.provision;
   lines.push("");
   lines.push(pc.bold("Provisioning"));
-  if (opts.provision) {
+  if (willProvision) {
+    lines.push(pc.dim(opts.yes ? "  (auto)" : "  (offered next — confirm each step)"));
     lines.push(`  Create Fly apps: ${flyApps.join(", ")}`);
     lines.push(`  Set GitHub secret: FLY_API_TOKEN`);
     if (hasEnv({ config, kind: "staging" }))
       lines.push(`  Create GitHub environment: staging`);
     if (hasEnv({ config, kind: "production" }))
       lines.push(`  Create GitHub environment: production (required reviewers)`);
+    const secrets = secretNames(config);
+    if (secrets.length)
+      lines.push(`  Set app secrets (per environment): ${secrets.join(", ")}`);
   } else {
     lines.push(pc.dim("  skipped (pass --provision to create Fly apps + secrets)"));
   }
@@ -86,3 +91,41 @@ const hasEnv = ({
   config: DeploykitConfig;
   kind: "staging" | "production";
 }) => Object.values(config.apps).some((a) => a.environments[kind]);
+
+/** Unique secret names across all configured apps. */
+export function secretNames(config: DeploykitConfig) {
+  const names = new Set<string>();
+  for (const app of Object.values(config.apps)) {
+    for (const s of app.secrets) names.add(s);
+  }
+  return [...names].sort();
+}
+
+/** Where each configured environment's secrets live in GitHub. */
+export interface SecretTarget {
+  kind: EnvironmentKind;
+  /** GitHub environment name, or undefined for repo-level secrets. */
+  env?: string;
+  /** Short label for prompts/plan output. */
+  label: string;
+}
+
+/**
+ * Map the configured environments to GitHub secret targets. Preview jobs have
+ * no GitHub `environment:` so they read repo-level secrets (env undefined);
+ * staging and production read their own environment's secrets.
+ */
+export function secretTargets(config: DeploykitConfig): SecretTarget[] {
+  const kinds = new Set<EnvironmentKind>();
+  for (const app of Object.values(config.apps)) {
+    for (const kind of Object.keys(app.environments) as EnvironmentKind[]) {
+      kinds.add(kind);
+    }
+  }
+  const targets: SecretTarget[] = [];
+  if (kinds.has("preview")) targets.push({ kind: "preview", label: "preview (repo)" });
+  if (kinds.has("staging")) targets.push({ kind: "staging", env: "staging", label: "staging" });
+  if (kinds.has("production"))
+    targets.push({ kind: "production", env: "production", label: "production" });
+  return targets;
+}

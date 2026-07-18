@@ -2,13 +2,16 @@ import * as p from "@clack/prompts";
 import type { DeploykitConfig } from "../config.js";
 import { detect } from "../detect.js";
 import { planFiles, writeFiles } from "../generate/index.js";
-import { flyAppNames, renderPlan } from "../plan.js";
+import { flyAppNames, renderPlan, secretNames, secretTargets } from "../plan.js";
 import { preflight } from "../preflight.js";
 import { openPr } from "../pr.js";
 import {
   createFlyApps,
   createGithubEnvironments,
+  ensureGithubEnvironment,
+  getRepo,
   setFlyTokenSecret,
+  setGithubSecret,
   type StepResult,
 } from "../provision.js";
 import { buildConfig, type InitOptions } from "../prompts.js";
@@ -41,7 +44,7 @@ export async function runInit(opts: InitOptions) {
   );
 
   // ── Phase 2: ask ──
-  const config = await buildConfig({ detection, opts });
+  const config = await buildConfig({ detection, opts, flyReady: pre.flyReady });
   if (!config) return 1; // cancelled or missing org
 
   // ── Phase 3: plan ──
@@ -68,7 +71,10 @@ export async function runInit(opts: InitOptions) {
   for (const f of skipped) p.log.warn(`skipped existing ${f}`);
 
   // ── Phase 5: provision ──
-  if (opts.provision) {
+  // Offered inline whenever the CLIs are authenticated. In non-interactive
+  // mode (--yes) we keep the old gate and only provision under --provision,
+  // since we can't prompt for secret values there.
+  if (!opts.yes || opts.provision) {
     await runProvisioning({
       config,
       opts,
@@ -128,6 +134,82 @@ async function runProvisioning({
       results: await createGithubEnvironments({ config, cwd: opts.cwd }),
     });
   }
+
+  // Environments must exist before we can set environment-scoped secrets, so
+  // this runs after createGithubEnvironments.
+  if (ghReady) await provisionSecrets({ config, opts });
+}
+
+/**
+ * Offer to set each app's detected env vars as GitHub secrets, scoped to the
+ * environments the user selected. Values are prompted (masked) per environment
+ * since staging and production usually differ; blank input skips that secret.
+ * Skipped in --yes mode — there's no way to collect values non-interactively.
+ */
+async function provisionSecrets({
+  config,
+  opts,
+}: {
+  config: DeploykitConfig;
+  opts: InitOptions;
+}) {
+  if (opts.yes) return;
+
+  const names = secretNames(config);
+  if (names.length === 0) return;
+
+  const targets = secretTargets(config);
+  if (targets.length === 0) return;
+
+  const envList = targets.map((t) => t.label).join(", ");
+  if (
+    !(await confirm({
+      opts,
+      message: `Set ${names.length} secret(s) as GitHub secrets for: ${envList}?`,
+    }))
+  ) {
+    return;
+  }
+
+  const repo = await getRepo(opts.cwd);
+  if (!repo) {
+    p.log.warn("Skipping secrets — couldn't resolve the GitHub repo (gh repo view).");
+    return;
+  }
+
+  for (const target of targets) {
+    p.log.step(
+      target.env
+        ? `Secrets for ${pc.bold(target.kind)} ${pc.dim(`(environment: ${target.env})`)}`
+        : `Secrets for ${pc.bold(target.kind)} ${pc.dim("(repository-level)")}`,
+    );
+    // Env-scoped secrets require the environment to exist first.
+    if (target.env) {
+      await ensureGithubEnvironment({ env: target.env, repo, cwd: opts.cwd });
+    }
+    for (const name of names) {
+      const value = await p.password({
+        message: `${name} ${pc.dim(`— ${target.kind}`)} (blank to skip)`,
+      });
+      if (p.isCancel(value)) {
+        p.log.warn("Stopped setting secrets.");
+        return;
+      }
+      if (!value.trim()) {
+        p.log.warn(`skipped ${name} (${target.kind})`);
+        continue;
+      }
+      const res = await setGithubSecret({
+        name,
+        value,
+        env: target.env,
+        repo,
+        cwd: opts.cwd,
+      });
+      if (res.ok) p.log.success(pc.green(res.label));
+      else p.log.error(`${res.label}: ${res.detail ?? "failed"}`);
+    }
+  }
 }
 
 async function maybeOpenPr({
@@ -177,11 +259,16 @@ async function confirm({ opts, message }: { opts: InitOptions; message: string }
 
 function nextSteps({ config, opts }: { config: DeploykitConfig; opts: InitOptions }) {
   const lines = [pc.bold("Next steps:")];
-  if (!opts.provision) {
+  // Interactive runs already offered provisioning inline; only print the manual
+  // fallback when nothing was offered (--yes without --provision).
+  const provisioningOffered = !opts.yes || opts.provision;
+  if (!provisioningOffered) {
     lines.push(
       '  • Set the FLY_API_TOKEN secret: gh secret set FLY_API_TOKEN --body "$(fly auth token)"',
     );
     lines.push(`  • Create Fly apps: ${flyAppNames(config).join(", ")}`);
+  } else {
+    lines.push(pc.dim("  • Anything you skipped above can be re-run with `deploykit init`."));
   }
   if (!opts.pr) lines.push("  • Commit the generated files and open a PR.");
   lines.push("  • Open a pull request to get your first preview environment 🚀");
