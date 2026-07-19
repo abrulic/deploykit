@@ -1,6 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DetectedApp, Detection } from "./detect.js";
-import { buildConfig, type InitOptions } from "./prompts.js";
+import { writeTree } from "./testing/fixtures.js";
+import {
+  buildConfig,
+  defaultNamePrefix,
+  sanitizeFlyName,
+  type InitOptions,
+} from "./prompts.js";
 
 const app: DetectedApp = {
   name: "web",
@@ -24,7 +30,13 @@ const detection: Detection = {
   apps: [app],
   libs: [],
   hasExistingWorkflows: false,
+  warnings: [],
 };
+
+// A fixture repo root: its package.json name drives the default Fly name prefix.
+const tree = writeTree({
+  files: { "package.json": JSON.stringify({ name: "@acme/shop_Monorepo" }) },
+});
 
 const baseOpts: InitOptions = {
   yes: true,
@@ -32,7 +44,7 @@ const baseOpts: InitOptions = {
   provision: false,
   pr: false,
   force: false,
-  cwd: "/tmp",
+  cwd: tree.root,
 };
 
 describe("buildConfig (non-interactive)", () => {
@@ -45,6 +57,7 @@ describe("buildConfig (non-interactive)", () => {
     else process.env.FLY_ORG = savedOrg;
     vi.restoreAllMocks();
   });
+  afterAll(() => tree.cleanup());
 
   it("builds a config from detection and flags", async () => {
     const config = await buildConfig({
@@ -54,10 +67,12 @@ describe("buildConfig (non-interactive)", () => {
     expect(config).not.toBeNull();
     expect(config?.provider).toEqual({ type: "fly", org: "acme", region: "sjc" });
     expect(Object.keys(config?.apps ?? {})).toEqual(["web"]);
+    // Fly names are globally unique → every name carries the derived prefix.
+    expect(config?.namePrefix).toBe("shop-monorepo");
     expect(config?.apps.web?.environments).toMatchObject({
-      preview: { name: "web-pr-{pr}" },
-      staging: { name: "web-staging" },
-      production: { name: "web-prod" },
+      preview: { name: "shop-monorepo-web-pr-{pr}" },
+      staging: { name: "shop-monorepo-web-staging" },
+      production: { name: "shop-monorepo-web-prod" },
     });
   });
 
@@ -108,5 +123,24 @@ describe("buildConfig (non-interactive)", () => {
     expect(config?.nxIntegrated).toBeUndefined();
     expect(config?.apps.web).not.toHaveProperty("prisma");
     expect(config?.apps.web).not.toHaveProperty("startCommand");
+  });
+});
+
+describe("name prefix derivation", () => {
+  it("sanitizes into a valid Fly name fragment", () => {
+    expect(sanitizeFlyName("@acme/Shop_Monorepo")).toBe("shop-monorepo");
+    expect(sanitizeFlyName("My Cool App!!")).toBe("my-cool-app");
+    expect(sanitizeFlyName("--weird--")).toBe("weird");
+    expect(sanitizeFlyName("x".repeat(50))).toHaveLength(30);
+  });
+
+  it("falls back to the directory name when there's no package name", () => {
+    const bare = writeTree({ files: { "turbo.json": "{}" } });
+    try {
+      // mkdtemp dirs look like "deploykit-test-XXXXXX" — already a valid slug.
+      expect(defaultNamePrefix(bare.root)).toMatch(/^deploykit-test-/);
+    } finally {
+      bare.cleanup();
+    }
   });
 });

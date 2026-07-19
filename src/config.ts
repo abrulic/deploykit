@@ -146,6 +146,14 @@ export interface DeploykitConfig {
   packageManager: PackageManager;
   /** Node major version used in the generated Dockerfiles, e.g. "20". */
   nodeVersion: string;
+  /**
+   * Project prefix for every generated Fly app name (e.g. "acme-shop" →
+   * "acme-shop-web-staging"). Fly app names are **globally** unique across all
+   * Fly users, so bare names like "web-staging" are almost always taken.
+   * Defaults to the root package name / repo dir; omitted → no prefix
+   * (pre-prefix configs keep their old names).
+   */
+  namePrefix?: string;
   provider: ProviderConfig;
   /** Deployable apps keyed by their short name (last path segment). */
   apps: Record<string, AppConfig>;

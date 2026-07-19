@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { writeTree } from "../testing/fixtures.js";
 import {
-  expandWorkspaceGlob,
+  expandWorkspaceGlobs,
   findFilesByName,
   globToRegex,
   listDir,
@@ -39,11 +39,11 @@ describe("globToRegex", () => {
   });
 });
 
-describe("expandWorkspaceGlob", () => {
+describe("expandWorkspaceGlobs", () => {
   let cleanup = () => {};
   afterEach(() => cleanup());
 
-  it("finds package dirs matching the glob", () => {
+  it("finds package dirs matching any glob", () => {
     const tree = writeTree({
       files: {
         "apps/web/package.json": "{}",
@@ -53,17 +53,36 @@ describe("expandWorkspaceGlob", () => {
     });
     cleanup = tree.cleanup;
 
-    const apps = expandWorkspaceGlob({ root: tree.root, pattern: "apps/*" }).sort();
-    expect(apps).toEqual(["apps/api", "apps/web"]);
-    expect(expandWorkspaceGlob({ root: tree.root, pattern: "packages/*" })).toEqual([
-      "packages/ui",
-    ]);
+    const all = expandWorkspaceGlobs({
+      root: tree.root,
+      patterns: ["apps/*", "packages/*"],
+    }).sort();
+    expect(all).toEqual(["apps/api", "apps/web", "packages/ui"]);
+  });
+
+  it("honors negation patterns like package managers do", () => {
+    const tree = writeTree({
+      files: {
+        "apps/web/package.json": "{}",
+        "apps/legacy/package.json": "{}",
+        "packages/ui/package.json": "{}",
+      },
+    });
+    cleanup = tree.cleanup;
+
+    const dirs = expandWorkspaceGlobs({
+      root: tree.root,
+      patterns: ["apps/*", "packages/*", "!apps/legacy"],
+    }).sort();
+    expect(dirs).toEqual(["apps/web", "packages/ui"]);
   });
 
   it("returns empty when nothing matches", () => {
     const tree = writeTree({ files: { "apps/web/package.json": "{}" } });
     cleanup = tree.cleanup;
-    expect(expandWorkspaceGlob({ root: tree.root, pattern: "services/*" })).toEqual([]);
+    expect(
+      expandWorkspaceGlobs({ root: tree.root, patterns: ["services/*"] }),
+    ).toEqual([]);
   });
 });
 

@@ -72,6 +72,7 @@ export async function runInit(opts: InitOptions) {
   p.log.step(
     `Detected ${pc.bold(detection.tool)} · ${detection.packageManager} · Node ${detection.nodeVersion} · ${deployable.length} app(s)`,
   );
+  for (const w of detection.warnings) p.log.warn(w);
 
   // ── Phase 2: ask ──
   // The Cloudflare step resolves its own token (env → .deploykit/credentials →
@@ -263,6 +264,14 @@ async function provisionFlyToken({
   capture: SecretCapture;
 }) {
   const existing = await listGithubSecretNames({ repo, cwd: opts.cwd });
+  if (existing === null) {
+    // Can't tell whether the token exists — creating one anyway would mint a
+    // fresh long-lived org token on every run with a flaky `gh`.
+    p.log.warn(
+      "Couldn't read the repo's secrets (gh secret list) — skipping Fly token creation.",
+    );
+    return;
+  }
   if (existing.has("FLY_API_TOKEN")) {
     p.log.info("FLY_API_TOKEN already set — skipping (delete it to rotate).");
     return;
@@ -429,10 +438,14 @@ async function provisionSecrets({
   if (targets === null) return; // cancelled
   if (targets.length === 0) return;
 
-  // What's already set per target, so we only prompt for what's missing.
+  // What's already set per target, so we only prompt for what's missing. An
+  // unreadable list (null) is treated as empty: for env-scoped targets that's
+  // the normal first run (the environment doesn't exist yet), and re-setting a
+  // secret is idempotent — unlike the token step, prompting again is harmless.
   const existingByLabel = new Map<string, Set<string>>();
   for (const t of targets) {
-    existingByLabel.set(t.label, await listGithubSecretNames({ env: t.env, repo, cwd: opts.cwd }));
+    const names = await listGithubSecretNames({ env: t.env, repo, cwd: opts.cwd });
+    existingByLabel.set(t.label, names ?? new Set());
   }
   const missingCount = targets.reduce(
     (n, t) => n + names.filter((nm) => !existingByLabel.get(t.label)!.has(nm)).length,
@@ -530,6 +543,11 @@ async function maybeOpenPr({
   s.start("Opening pull request");
   const res = await openPr({ cwd: opts.cwd, paths: written });
   s.stop(res.ok ? pc.green(`PR opened: ${res.url}`) : pc.red(`PR failed: ${res.detail}`));
+  if (res.restoredTo) {
+    p.log.info(
+      `Back on ${pc.bold(res.restoredTo)} — the generated files live on the PR branch.`,
+    );
+  }
 }
 
 function report({ spinner, results }: { spinner: Spinner; results: StepResult[] }) {

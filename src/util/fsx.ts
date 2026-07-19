@@ -74,16 +74,28 @@ export function globToRegex(pattern: string) {
   return new RegExp(`^${escaped}$`);
 }
 
-/** Directories matching a workspace glob that contain a package.json. */
-export function expandWorkspaceGlob({
+/**
+ * Directories containing a package.json that match the workspace globs.
+ * Walks the tree once for all patterns, and honors negations (`!apps/legacy`)
+ * the way package managers do: a dir counts when it matches any positive
+ * pattern and no negative one.
+ */
+export function expandWorkspaceGlobs({
   root,
-  pattern,
+  patterns,
 }: {
   root: string;
-  pattern: string;
+  patterns: string[];
 }) {
-  const re = globToRegex(pattern);
-  return packageDirs(root).filter((d) => re.test(d));
+  const positives = patterns
+    .filter((p) => !p.startsWith("!"))
+    .map(globToRegex);
+  const negatives = patterns
+    .filter((p) => p.startsWith("!"))
+    .map((p) => globToRegex(p.slice(1)));
+  return packageDirs(root).filter(
+    (d) => positives.some((re) => re.test(d)) && !negatives.some((re) => re.test(d)),
+  );
 }
 
 export interface WalkFilesInput {

@@ -40,7 +40,6 @@ ${prismaSteps(app, pm)}RUN ${pm.run} nx build ${project}${productionFlag}
 
 function runner({ app, config }: { app: AppConfig; config: DeploykitConfig }) {
   const node = nodeImage(config);
-  const pm = PM[config.packageManager];
   const { root, port, framework } = app;
   const integrated = config.nxIntegrated ?? true;
   const out = `dist/${root}`; // Nx default output location (integrated)
@@ -62,11 +61,14 @@ CMD ["node", "server.js"]
   if (serveModel(app) === "server") {
     // Integrated Nx bundles the server + a pruned package.json to dist/<root>,
     // so ship just that and run it — the lean path for @nx/esbuild|webpack apps.
+    // The install must use npm: the runner is a bare node image (no corepack
+    // enable), so pnpm/yarn/bun aren't on PATH — and the pruned package.json
+    // has no lockfile or workspace: refs, so npm handles it for every manager.
     if (integrated && !app.startCommand && (framework === "remix" || framework === "node-server")) {
       return `${header}
 
 COPY --from=build --chown=appuser:nodejs /app/${out} ./
-RUN ${pm.installProd}
+RUN npm install --omit=dev
 USER appuser
 CMD ["node", "main.js"]
 `;

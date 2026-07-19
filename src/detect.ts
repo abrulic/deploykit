@@ -9,7 +9,7 @@ import type {
 } from "./config.js";
 import { DEFAULT_PORTS } from "./config.js";
 import {
-  expandWorkspaceGlob,
+  expandWorkspaceGlobs,
   fileExists,
   findFilesByName,
   listDir,
@@ -75,6 +75,8 @@ export interface Detection {
   apps: DetectedApp[];
   libs: DetectedLib[];
   hasExistingWorkflows: boolean;
+  /** Non-fatal problems worth surfacing before generating files. */
+  warnings: string[];
   /** Env to neutralize `prepare` git-hook installers during the Docker install. */
   installEnv?: Record<string, string>;
   /** Nx only: true = integrated (project.json); false = package-based. */
@@ -104,9 +106,16 @@ const ENV_DENYLIST = new Set([
 ]);
 
 export function detect(cwd: string): Detection {
-  const tool: MonorepoTool = fileExists(join(cwd, "turbo.json"))
-    ? "turbo"
-    : "nx";
+  // Preflight checks this too, but detect() is a public entry point — fail
+  // loudly rather than silently assuming Nx when neither tool file exists.
+  const hasTurbo = fileExists(join(cwd, "turbo.json"));
+  const hasNx = fileExists(join(cwd, "nx.json"));
+  if (!hasTurbo && !hasNx) {
+    throw new Error(
+      `No monorepo tool found in ${cwd} (looked for turbo.json / nx.json).`,
+    );
+  }
+  const tool: MonorepoTool = hasTurbo ? "turbo" : "nx";
   const packageManager = detectPackageManager(cwd);
 
   const { apps, libs, nxIntegrated } = detectProjects({ cwd, tool });
@@ -141,6 +150,7 @@ export function detect(cwd: string): Detection {
     apps,
     libs,
     hasExistingWorkflows,
+    warnings: detectWarnings({ cwd, apps }),
   };
   const installEnv = detectInstallEnv(cwd);
   if (installEnv) detection.installEnv = installEnv;
@@ -171,12 +181,9 @@ function detectPackageProjects({
   cwd: string;
   tool: MonorepoTool;
 }): Projects {
-  const dirs = new Set<string>();
-  for (const pattern of workspaceGlobs(cwd)) {
-    for (const dir of expandWorkspaceGlob({ root: cwd, pattern })) {
-      dirs.add(toPosix(dir));
-    }
-  }
+  const dirs = new Set<string>(
+    expandWorkspaceGlobs({ root: cwd, patterns: workspaceGlobs(cwd) }).map(toPosix),
+  );
 
   const raw = readPackages({ cwd, dirs });
   const byName = new Map(raw.map((r) => [r.name, r]));
@@ -542,6 +549,33 @@ function detectPrismaTargets({
     }
   }
   return targets;
+}
+
+/**
+ * Non-fatal problems the user should hear about *before* the first deploy
+ * fails. Currently: Next apps whose config doesn't set `output: "standalone"`,
+ * which the generated Dockerfile's runner stage requires.
+ */
+function detectWarnings({
+  cwd,
+  apps,
+}: {
+  cwd: string;
+  apps: DetectedApp[];
+}): string[] {
+  const warnings: string[] = [];
+  for (const app of apps) {
+    if (app.framework !== "next") continue;
+    const config = ["next.config.ts", "next.config.mjs", "next.config.js", "next.config.cjs"]
+      .map((f) => readText(join(cwd, app.root, f)))
+      .find((t) => t !== null);
+    if (!config || !/\boutput\s*:\s*["']standalone["']/.test(config)) {
+      warnings.push(
+        `${app.name}: the generated Dockerfile needs \`output: "standalone"\` in ${app.root}/next.config.* — add it before the first deploy.`,
+      );
+    }
+  }
+  return warnings;
 }
 
 /**

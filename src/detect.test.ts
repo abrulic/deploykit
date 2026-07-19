@@ -117,6 +117,34 @@ describe("detect", () => {
     const result = detect(tree.root);
     expect(result.apps).toEqual([]);
   });
+
+  it("throws when neither turbo.json nor nx.json exists", () => {
+    const tree = writeTree({
+      files: { "package.json": JSON.stringify({ name: "root" }) },
+    });
+    cleanup = tree.cleanup;
+    // Must not silently fall back to "nx" — detect() is a public entry point.
+    expect(() => detect(tree.root)).toThrow(/turbo\.json \/ nx\.json/);
+  });
+
+  it("warns when a Next app's config lacks output standalone", () => {
+    const tree = writeTree({ files: MONOREPO });
+    cleanup = tree.cleanup;
+    // MONOREPO's web app has no next.config at all.
+    const { warnings } = detect(tree.root);
+    expect(warnings.some((w) => w.includes("standalone") && w.includes("web"))).toBe(true);
+  });
+
+  it("stays quiet when the Next config sets output standalone", () => {
+    const tree = writeTree({
+      files: {
+        ...MONOREPO,
+        "apps/web/next.config.mjs": 'export default { output: "standalone" };\n',
+      },
+    });
+    cleanup = tree.cleanup;
+    expect(detect(tree.root).warnings).toEqual([]);
+  });
 });
 
 const NX_MONOREPO = {

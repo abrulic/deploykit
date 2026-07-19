@@ -1,3 +1,4 @@
+import { basename, join } from "node:path";
 import * as p from "@clack/prompts";
 import type {
   AppConfig,
@@ -10,6 +11,7 @@ import type { DetectedApp, Detection } from "./detect.js";
 import { listCloudflareZones } from "./cloudflare.js";
 import { listFlyOrgs } from "./fly.js";
 import { readCredential, saveCredential } from "./secrets-file.js";
+import { readJson } from "./util/fsx.js";
 import { pc } from "./util/log.js";
 
 /** Custom hostnames keyed by app name → environment. */
@@ -74,6 +76,9 @@ export async function buildConfig({
   const provider = await pickProvider(opts, flyReady);
   if (!provider) return cancel();
 
+  const namePrefix = await pickNamePrefix(opts.cwd);
+  if (namePrefix === null) return cancel();
+
   const cf = await pickCloudflare({ apps: chosenApps, envs, cwd: opts.cwd });
   if (!cf) return cancel();
 
@@ -84,6 +89,7 @@ export async function buildConfig({
     apps: chosenApps,
     envs,
     provider,
+    namePrefix,
     cloudflare: cf.cloudflare,
     hostnames: cf.hostnames,
   });
@@ -110,7 +116,59 @@ function buildFromDefaults({
     apps: deployable,
     envs: ALL_ENVS,
     provider: { org, region: opts.region ?? "iad" },
+    namePrefix: defaultNamePrefix(opts.cwd),
   });
+}
+
+/**
+ * Sanitize a candidate into a valid Fly app-name fragment: lowercase
+ * alphanumerics and hyphens (scopes stripped), capped so the full generated
+ * name ("<prefix>-<app>-staging") stays well under Fly's length limit.
+ */
+export function sanitizeFlyName(raw: string): string {
+  return (
+    raw
+      .toLowerCase()
+      .split("/")
+      .at(-1)!
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 30)
+      .replace(/-$/, "")
+  );
+}
+
+/**
+ * Default Fly app-name prefix: the root package.json name (scope stripped),
+ * falling back to the repo directory name. Fly app names are globally unique
+ * across all Fly users, so bare names like "web-staging" are almost always
+ * taken — a project-specific prefix keeps them claimable.
+ */
+export function defaultNamePrefix(cwd: string): string {
+  const rootName = readJson<{ name?: string }>(join(cwd, "package.json"))?.name;
+  return sanitizeFlyName(rootName || basename(cwd));
+}
+
+/** Ask for the Fly app-name prefix (blank to opt out). Null on cancel. */
+async function pickNamePrefix(cwd: string): Promise<string | null> {
+  const suggestion = defaultNamePrefix(cwd);
+  const input = await p.text({
+    message: `Fly app name prefix ${pc.dim(
+      "(Fly names are global — a unique prefix avoids \"name taken\"; blank for none)",
+    )}`,
+    initialValue: suggestion,
+    placeholder: suggestion,
+    validate: (v) => {
+      const t = v.trim();
+      if (!t) return undefined; // blank = no prefix, at the user's own risk
+      return /^[a-z0-9][a-z0-9-]*$/.test(t)
+        ? undefined
+        : "Lowercase letters, digits and hyphens only (must start with a letter or digit)";
+    },
+  });
+  if (p.isCancel(input)) return null;
+  return input.trim();
 }
 
 async function pickApps(deployable: DetectedApp[]) {
@@ -341,6 +399,7 @@ function assemble({
   apps,
   envs,
   provider,
+  namePrefix = "",
   cloudflare,
   hostnames,
 }: {
@@ -348,12 +407,19 @@ function assemble({
   apps: DetectedApp[];
   envs: EnvironmentKind[];
   provider: { org: string; region: string };
+  /** Prefix for every Fly app name; "" → no prefix. */
+  namePrefix?: string;
   cloudflare?: CloudflareConfig;
   hostnames?: HostMap;
 }) {
   const appMap: Record<string, AppConfig> = {};
   for (const a of apps)
-    appMap[a.name] = appConfigFor({ app: a, envs, hosts: hostnames?.[a.name] });
+    appMap[a.name] = appConfigFor({
+      app: a,
+      envs,
+      namePrefix,
+      hosts: hostnames?.[a.name],
+    });
 
   const config: DeploykitConfig = {
     tool: detection.tool,
@@ -362,6 +428,7 @@ function assemble({
     provider: { type: "fly", org: provider.org, region: provider.region },
     apps: appMap,
   };
+  if (namePrefix) config.namePrefix = namePrefix;
   if (cloudflare) config.cloudflare = cloudflare;
   if (detection.installEnv) config.installEnv = detection.installEnv;
   if (detection.nxIntegrated !== undefined) config.nxIntegrated = detection.nxIntegrated;
@@ -371,19 +438,23 @@ function assemble({
 function appConfigFor({
   app,
   envs,
+  namePrefix,
   hosts,
 }: {
   app: DetectedApp;
   envs: EnvironmentKind[];
+  namePrefix: string;
   hosts?: Partial<Record<EnvironmentKind, string>>;
 }) {
+  // Base of every Fly app name for this app, e.g. "acme-shop-web".
+  const base = namePrefix ? `${namePrefix}-${app.name}` : app.name;
   const environments: Partial<Record<EnvironmentKind, AppEnvironment>> = {};
   if (envs.includes("preview"))
-    environments.preview = { name: `${app.name}-pr-{pr}`, trigger: "pr" };
+    environments.preview = { name: `${base}-pr-{pr}`, trigger: "pr" };
   if (envs.includes("staging"))
-    environments.staging = withHost({ name: `${app.name}-staging`, trigger: "push:main" }, hosts?.staging);
+    environments.staging = withHost({ name: `${base}-staging`, trigger: "push:main" }, hosts?.staging);
   if (envs.includes("production"))
-    environments.production = withHost({ name: `${app.name}-prod`, trigger: "manual" }, hosts?.production);
+    environments.production = withHost({ name: `${base}-prod`, trigger: "manual" }, hosts?.production);
 
   const config: AppConfig = {
     root: app.root,

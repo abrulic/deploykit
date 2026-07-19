@@ -28,6 +28,19 @@ describe("generateDockerfile", () => {
     expect(gen("next", npmConfig)).toContain("npx --yes turbo prune");
   });
 
+  it("installs bun in the base stage (corepack doesn't provide it)", () => {
+    const bunConfig: DeploykitConfig = { ...sampleConfig, packageManager: "bun" };
+    const out = gen("next", bunConfig);
+    expect(out).toContain("RUN npm install -g bun");
+    expect(out).toContain("RUN bun install");
+    // bun must be installed before the workspace install runs.
+    expect(out.indexOf("npm install -g bun")).toBeLessThan(out.indexOf("RUN bun install"));
+  });
+
+  it("does not install bun for other package managers", () => {
+    expect(gen("next")).not.toContain("npm install -g bun");
+  });
+
   it("emits a Next standalone runner", () => {
     const out = gen("next");
     expect(out).toContain(".next/standalone");

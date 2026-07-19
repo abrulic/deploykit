@@ -19,6 +19,8 @@ export interface CfResponse<T> {
   result?: T;
   /** Human-readable failure detail, when `ok` is false. */
   detail?: string;
+  /** HTTP status of the response, when one was received. */
+  status?: number;
 }
 
 export interface CfZone {
@@ -61,6 +63,8 @@ async function request<T>({
         "Content-Type": "application/json",
       },
       body: body === undefined ? undefined : JSON.stringify(body),
+      // A stalled connection must not hang the CLI forever.
+      signal: AbortSignal.timeout(15_000),
     });
   } catch (err) {
     return { ok: false, detail: `network error: ${String(err)}` };
@@ -77,28 +81,36 @@ async function request<T>({
     const detail =
       json?.errors?.map((e) => `${e.code} ${e.message}`).join("; ") ||
       `HTTP ${res.status}`;
-    return { ok: false, detail };
+    return { ok: false, detail, status: res.status };
   }
-  return { ok: true, result: json.result };
+  return { ok: true, result: json.result, status: res.status };
 }
 
 /**
  * List every zone the token can see, for a pick-from-a-list prompt (mirrors the
- * Fly org picker). Returns null when the call fails so callers fall back to a
- * free-text zone entry.
+ * Fly org picker). Paginates so accounts with more than a page of zones aren't
+ * silently truncated. Returns null when the first call fails so callers fall
+ * back to a free-text zone entry.
  */
 export async function listCloudflareZones({
   token,
 }: {
   token: string;
 }): Promise<CfZone[] | null> {
-  const res = await request<CfZone[]>({
-    token,
-    method: "GET",
-    path: "/zones?per_page=50",
-  });
-  if (!res.ok || !res.result) return null;
-  return res.result.map((z) => ({ id: z.id, name: z.name }));
+  const perPage = 50;
+  const zones: CfZone[] = [];
+  // Hard cap of 20 pages (1000 zones) — plenty for a picker.
+  for (let page = 1; page <= 20; page++) {
+    const res = await request<CfZone[]>({
+      token,
+      method: "GET",
+      path: `/zones?per_page=${perPage}&page=${page}`,
+    });
+    if (!res.ok || !res.result) return page === 1 ? null : zones;
+    zones.push(...res.result.map((z) => ({ id: z.id, name: z.name })));
+    if (res.result.length < perPage) break;
+  }
+  return zones;
 }
 
 /**
@@ -210,10 +222,76 @@ export async function setZoneSetting({
   });
 }
 
+/** A rule inside a phase entrypoint ruleset. Extra fields are passed through. */
+interface CfRule {
+  id?: string;
+  action?: string;
+  expression?: string;
+  enabled?: boolean;
+  action_parameters?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+interface CfRuleset {
+  id?: string;
+  rules?: CfRule[];
+}
+
+/** Read-only fields the API returns on rules but rejects/ignores on writes. */
+const stripReadOnly = ({ version, last_updated, ...rule }: CfRule): CfRule => rule;
+
 /**
- * Deploy Cloudflare's Managed Ruleset into the WAF phase. Best-effort: on
- * plans without managed WAF this returns `ok: false` with the API detail, and
- * the caller reports a clean skip rather than failing the run.
+ * Append a rule to a phase's entrypoint ruleset, **preserving every rule the
+ * user already has there** — a bare PUT on the entrypoint replaces the whole
+ * rule list, which for an existing zone would silently wipe their WAF/cache
+ * rules. Flow: GET the entrypoint (404 → no ruleset yet, start empty; any
+ * other failure → abort, never write blind), skip if an equivalent rule is
+ * already present, else PUT back existing rules + ours.
+ */
+async function upsertPhaseRule({
+  token,
+  zoneId,
+  phase,
+  rule,
+  isEquivalent,
+}: {
+  token: string;
+  zoneId: string;
+  phase: string;
+  rule: CfRule;
+  /** Whether an existing rule already does what `rule` would add. */
+  isEquivalent: (existing: CfRule) => boolean;
+}): Promise<CfResponse<{ changed: boolean }>> {
+  const path = `/zones/${zoneId}/rulesets/phases/${phase}/entrypoint`;
+  const current = await request<CfRuleset>({ token, method: "GET", path });
+
+  let existing: CfRule[] = [];
+  if (current.ok) {
+    existing = current.result?.rules ?? [];
+  } else if (current.status !== 404) {
+    // Can't see the current rules — do NOT write, a PUT would replace them all.
+    return { ok: false, detail: `couldn't read existing ${phase} rules: ${current.detail}` };
+  }
+
+  if (existing.some(isEquivalent)) return { ok: true, result: { changed: false } };
+
+  const res = await request({
+    token,
+    method: "PUT",
+    path,
+    body: { rules: [...existing.map(stripReadOnly), rule] },
+  });
+  return res.ok ? { ok: true, result: { changed: true } } : { ok: false, detail: res.detail };
+}
+
+/** Cloudflare Managed Ruleset — a well-known, account-independent ID. */
+const MANAGED_RULESET_ID = "efb7b8c949ac4650a09736fc376e9aee";
+
+/**
+ * Deploy Cloudflare's Managed Ruleset into the WAF phase, keeping any rules
+ * already in the phase. Best-effort: on plans without managed WAF this returns
+ * `ok: false` with the API detail, and the caller reports a clean skip rather
+ * than failing the run.
  */
 export async function deployManagedWaf({
   token,
@@ -222,22 +300,29 @@ export async function deployManagedWaf({
   token: string;
   zoneId: string;
 }): Promise<CfResponse<unknown>> {
-  return request({
+  return upsertPhaseRule({
     token,
-    method: "PUT",
-    path: `/zones/${zoneId}/rulesets/phases/http_request_firewall_managed/entrypoint`,
-    body: {
-      rules: [
-        { action: "execute", expression: "true", enabled: true,
-          action_parameters: { id: "efb7b8c949ac4650a09736fc376e9aee" } }, // Cloudflare Managed Ruleset
-      ],
+    zoneId,
+    phase: "http_request_firewall_managed",
+    rule: {
+      action: "execute",
+      expression: "true",
+      enabled: true,
+      action_parameters: { id: MANAGED_RULESET_ID },
     },
+    isEquivalent: (r) =>
+      r.action === "execute" && r.action_parameters?.id === MANAGED_RULESET_ID,
   });
 }
 
+const STATIC_ASSET_EXPRESSION =
+  '(starts_with(http.request.uri.path, "/assets/")) or ' +
+  '(http.request.uri.path.extension in {"js" "css" "png" "jpg" "jpeg" "gif" "svg" "webp" "avif" "ico" "woff" "woff2" "ttf" "otf" "eot"})';
+
 /**
  * Add an edge cache rule for static assets (long edge TTL for common asset
- * paths/extensions) via the cache-settings ruleset phase. Best-effort.
+ * paths/extensions) via the cache-settings ruleset phase, keeping any rules
+ * already in the phase. Best-effort.
  */
 export async function setStaticAssetCacheRule({
   token,
@@ -248,27 +333,22 @@ export async function setStaticAssetCacheRule({
   zoneId: string;
   edgeTtlSeconds?: number;
 }): Promise<CfResponse<unknown>> {
-  const expression =
-    '(starts_with(http.request.uri.path, "/assets/")) or ' +
-    '(http.request.uri.path.extension in {"js" "css" "png" "jpg" "jpeg" "gif" "svg" "webp" "avif" "ico" "woff" "woff2" "ttf" "otf" "eot"})';
-  return request({
+  return upsertPhaseRule({
     token,
-    method: "PUT",
-    path: `/zones/${zoneId}/rulesets/phases/http_request_cache_settings/entrypoint`,
-    body: {
-      rules: [
-        {
-          action: "set_cache_settings",
-          expression,
-          enabled: true,
-          action_parameters: {
-            cache: true,
-            edge_ttl: { mode: "override_origin", default: edgeTtlSeconds },
-            browser_ttl: { mode: "override_origin", default: edgeTtlSeconds },
-          },
-        },
-      ],
+    zoneId,
+    phase: "http_request_cache_settings",
+    rule: {
+      action: "set_cache_settings",
+      expression: STATIC_ASSET_EXPRESSION,
+      enabled: true,
+      action_parameters: {
+        cache: true,
+        edge_ttl: { mode: "override_origin", default: edgeTtlSeconds },
+        browser_ttl: { mode: "override_origin", default: edgeTtlSeconds },
+      },
     },
+    isEquivalent: (r) =>
+      r.action === "set_cache_settings" && r.expression === STATIC_ASSET_EXPRESSION,
   });
 }
 

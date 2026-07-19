@@ -2,8 +2,7 @@ import { resolve } from "node:path";
 import { runInit } from "./commands/init.js";
 import type { InitOptions } from "./prompts.js";
 import { log, pc } from "./util/log.js";
-
-const VERSION = "0.1.0";
+import { PKG } from "./util/pkg.js";
 
 const HELP = `${pc.bold("deploykit")} — automate CI/CD for Turbo monorepos on Fly.io
 
@@ -102,7 +101,7 @@ async function main() {
   const parsed = parseArgs(process.argv.slice(2));
 
   if (parsed.version) {
-    log.info(VERSION);
+    log.info(PKG.version);
     return 0;
   }
   if (parsed.help) {
