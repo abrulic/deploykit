@@ -60,6 +60,24 @@ deploykit.config.ts             source of truth for every decision
 - **Fly.io** as the deploy target.
 - **No database provisioning** — databases are a separate concern; see the roadmap.
 
+## Security & Privacy
+
+deploykit is a **local CLI with no backend** — it never sends your credentials
+anywhere except directly to GitHub, Fly, and Cloudflare to do the work you ask
+for, and it collects **no telemetry**.
+
+- **GitHub** sign-in uses the OAuth device flow ("Authorize DeployKit"); the
+  token is stored by the official `gh` CLI (your OS keychain or
+  `~/.config/gh/hosts.yml`) — deploykit keeps no copy.
+- **Fly** is handled by `flyctl`; the CI deploy token is written only as your
+  repo's `FLY_API_TOKEN` GitHub Actions secret.
+- **Cloudflare** tokens (optional) stay in the git-ignored `.deploykit/credentials`
+  file (mode `0600`) or an env var — never committed.
+
+You can verify all of this: the code is source-available (see
+[`src/auth.ts`](src/auth.ts)), and releases ship with npm provenance. Full
+details and revocation steps are in [SECURITY.md](SECURITY.md).
+
 ## License
 
 deploykit is **source-available** under the [Business Source License 1.1](LICENSE) (`BUSL-1.1`).

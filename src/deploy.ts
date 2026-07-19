@@ -202,11 +202,17 @@ export async function firstDeploy({
 
     const code = await d.runDeploy(deployArgs(t), cwd);
     if (code === 0) {
-      d.log.success(`Deployed ${t.app} — ${flyUrl(t.flyApp)}`);
       if (t.hostname) {
+        // Custom domain is the real destination — lead with it, keep the
+        // fly.dev address as the dim fallback that answers immediately.
+        d.log.success(`Deployed ${t.app} → https://${t.hostname}`);
         d.log.info(
-          `Custom domain ${t.hostname} serves once Cloudflare DNS propagates.`,
+          pc.dim(
+            `${flyUrl(t.flyApp)} answers now · https://${t.hostname} serves once Cloudflare DNS propagates`,
+          ),
         );
+      } else {
+        d.log.success(`Deployed ${t.app} → ${flyUrl(t.flyApp)}`);
       }
     } else {
       d.log.warn(

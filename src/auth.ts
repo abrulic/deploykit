@@ -151,8 +151,29 @@ export async function ensureAuth({
   interactive: boolean;
   deps?: Partial<AuthDeps>;
 }): Promise<{ ghReady: boolean; flyReady: boolean }> {
-  if (ghReady && flyReady) return { ghReady, flyReady };
-  if (interactive) p.log.step("Sign in to GitHub and Fly");
+  if (ghReady && flyReady) {
+    // The "Sign in" phase header is already on screen; fill it so it doesn't
+    // read as an empty step when there's nothing to do.
+    if (interactive)
+      p.log.success(pc.green("Already signed in to GitHub and Fly."));
+    return { ghReady, flyReady };
+  }
+  if (interactive) {
+    const need = [!ghReady && "GitHub", !flyReady && "Fly"]
+      .filter(Boolean)
+      .join(" and ");
+    p.note(
+      [
+        `deploykit connects your ${need} account to provision your deploy.`,
+        "It signs you in with the official CLIs using their normal browser",
+        "login — the same one you'd run yourself.",
+        "",
+        `${pc.dim("• Your credentials stay in the GitHub/Fly CLIs — deploykit never sees or stores them.")}`,
+        `${pc.dim("• GitHub's page shows your sign-in location; that's their security check, not ours.")}`,
+      ].join("\n"),
+      "Connect your accounts",
+    );
+  }
   const gh = await ensureLoggedIn({
     tool: GH_TOOL,
     ready: ghReady,

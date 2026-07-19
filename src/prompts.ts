@@ -16,7 +16,7 @@ import type { DetectedApp, Detection } from "./detect.js";
 import { listFlyOrgs } from "./fly.js";
 import { readCredential, saveCredential } from "./secrets-file.js";
 import { readJson } from "./util/fsx.js";
-import { pc } from "./util/log.js";
+import { link, pc } from "./util/log.js";
 
 /** Custom hostnames keyed by app name → environment. */
 type HostMap = Record<string, Partial<Record<EnvironmentKind, string>>>;
@@ -333,6 +333,23 @@ async function pickCloudflare({
     security: true,
     cache: true,
   };
+
+  // Close the section with a recap so scrolling back shows the choices at a glance.
+  const mapped = Object.entries(hostnames).flatMap(([app, m]) =>
+    Object.entries(m).map(([kind, host]) => `${app} ${pc.dim(kind)} ${host}`),
+  );
+  if (mapped.length) {
+    p.log.success(
+      pc.green(
+        `Cloudflare ready · zone ${pc.bold(zone)} · ${mapped.length} domain${mapped.length === 1 ? "" : "s"}`,
+      ),
+    );
+    p.log.message(mapped.join("\n"));
+  } else {
+    p.log.info(
+      `Cloudflare zone ${pc.bold(zone)} recorded — no custom hostnames entered.`,
+    );
+  }
   return { cloudflare, hostnames };
 }
 
@@ -357,13 +374,16 @@ async function resolveCloudflareToken(cwd: string): Promise<string | null> {
   // have to guess which permissions to tick.
   p.note(
     [
-      "deploykit needs a Cloudflare API token for your zone.",
-      "Open this link (permissions are pre-filled), pick your domain under",
-      `${pc.bold('"Zone Resources"')}, create the token, then paste it below:`,
-      "",
-      pc.cyan(cloudflareTokenSetupUrl()),
+      "A Cloudflare API token lets deploykit set up DNS for your zone.",
+      "The link below opens Cloudflare with permissions pre-filled — just",
+      `pick your domain under ${pc.bold('"Zone Resources"')} and create it.`,
     ].join("\n"),
-    "Cloudflare API token",
+    "Cloudflare",
+  );
+  // Rendered outside the note: an OSC 8 hyperlink's hidden URL bytes would
+  // otherwise blow out clack's box-width calculation.
+  p.log.message(
+    `${pc.cyan("→")} ${pc.cyan(link("Create a pre-scoped Cloudflare token", cloudflareTokenSetupUrl()))}`,
   );
 
   // Up to three tries so a mistyped/expired paste is caught here, not mid-provision.
