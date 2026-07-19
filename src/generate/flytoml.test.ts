@@ -27,7 +27,7 @@ describe("generateFlyToml", () => {
     expect(toml).toContain("[[http_service.checks]]");
     expect(toml).toContain('method = "GET"');
     expect(toml).toContain('path = "/"');
-    expect(toml).toContain('grace_period = "10s"');
+    expect(toml).toContain('grace_period = "30s"');
   });
 
   it("uses a configured healthCheckPath when set", () => {

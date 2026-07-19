@@ -27,12 +27,14 @@ primary_region = "iad"
   # release, and keeps the old machines running if it fails — auto-rollback on a
   # bad deploy. If "/" 404s (e.g. an API with no root route), point
   # it at a lightweight endpoint via `healthCheckPath` in deploykit.config.ts.
+  # grace_period is deliberately generous: a slow SSR cold-start on shared-cpu
+  # shouldn't be mistaken for a bad release and block the deploy.
   [[http_service.checks]]
     method = "GET"
     path = "/"
     interval = "15s"
     timeout = "5s"
-    grace_period = "10s"
+    grace_period = "30s"
 
 [[vm]]
   size = "shared-cpu-1x"
