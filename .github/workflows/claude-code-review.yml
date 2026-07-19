@@ -1,0 +1,53 @@
+name: Claude Code Review
+
+# Reviews PRs automatically:
+#  • PR opened / new commits pushed (synchronize) → Claude reviews the diff.
+#  • Drafts and Dependabot PRs are skipped (see the job `if`).
+#  • Only runs when files under src/ change (see paths) — docs/config-only PRs
+#    don't burn a review.
+#  • Review behavior is tuned in REVIEW.md at the repo root, not here.
+#
+# Setup: add ANTHROPIC_API_KEY as a repository secret
+# (Settings → Secrets and variables → Actions) and install the Claude GitHub
+# App at https://github.com/apps/claude.
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - "src/**"
+      - "package.json"
+      - "tsconfig.json"
+
+# One review per PR at a time; a new push cancels the in-flight review.
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Skip drafts and bot-authored PRs.
+    if: >
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # read the diff
+      pull-requests: write # post review comments
+      id-token: write # OIDC for the action
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so Claude can diff against the base
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: >
+            Review this pull request. First read REVIEW.md at the repo root and
+            follow it as the source of truth for what to flag and how to rank
+            severity. Focus on correctness, security, and the project's code
+            quality standards. Post findings as inline PR comments; skip praise
+            and restating the diff.
+          claude_args: |
+            --model claude-opus-4-8
+            --max-turns 8
