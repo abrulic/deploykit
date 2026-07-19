@@ -1,4 +1,34 @@
+import type { AppConfig } from "../config.js";
 import type { GenerateAppFileInput } from "./types.js";
+
+/**
+ * A COMMENTED-OUT `[deploy] release_command` for apps with a detected Prisma
+ * schema — Fly's idiomatic per-release migration hook. Emitted only as guidance:
+ * deploykit never runs migrations (a bad one causes irreversible data loss), so
+ * it's inert until the user uncomments it against a database they own. Empty for
+ * apps with no Prisma target, so their fly.toml is byte-for-byte unchanged.
+ */
+function migrationHint(app: AppConfig): string {
+  const targets = app.prisma ?? [];
+  if (targets.length === 0) return "";
+  const cmd = targets
+    .map(
+      (t) =>
+        `(cd ${t.root} && npx prisma migrate deploy${t.hasConfig ? "" : ` --schema ./${t.schema}`})`,
+    )
+    .join(" && ");
+  return `# Database migrations: [deploy].release_command runs once per release,
+# before new machines take traffic — the idiomatic place for migrations.
+# deploykit generated this COMMENTED OUT and never runs it. Uncomment only
+# against a database you own, and confirm the Prisma CLI + schema are present in
+# the runtime image. A destructive migration here can cause irreversible data
+# loss, and it is not undone by \`deploykit rollback\` (which reverts the image
+# only). See the Database migrations section of the README.
+# [deploy]
+#   release_command = "${cmd}"
+
+`;
+}
 
 /**
  * Per-app fly.toml. The `app` field is only a local default — CI always targets
@@ -13,7 +43,7 @@ primary_region = "${config.provider.region}"
 
 # Build context is the repo root; CI passes --dockerfile ${app.root}/Dockerfile.
 
-[http_service]
+${migrationHint(app)}[http_service]
   internal_port = ${app.port}
   force_https = true
   auto_stop_machines = "stop"

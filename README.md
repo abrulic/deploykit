@@ -87,12 +87,31 @@ This is for **stateless** apps: deploykit does not model database locality, so a
 far-region machine still talks to whatever single-region `DATABASE_URL` you set —
 expect high write latency. Read replicas / `fly-replay` are out of scope.
 
+## Database migrations
+
+deploykit does **not** run migrations — a bad one causes irreversible data loss,
+and owning that is out of scope. Instead, when it detects a Prisma schema in an
+app it writes a **commented-out** hook into that app's `fly.toml`:
+
+```toml
+# [deploy]
+#   release_command = "(cd packages/db && npx prisma migrate deploy --schema ./prisma/schema.prisma)"
+```
+
+`[deploy].release_command` is Fly's idiomatic migration hook: it runs once per
+release, before new machines take traffic. Uncomment it only against a database
+you own, and make sure the Prisma CLI and schema are present in your runtime
+image. Note that `deploykit rollback` reverts the **image only** — it does not
+undo a migration this hook applied, so prefer additive (expand/contract)
+migrations. Using another tool (Drizzle, Knex, …)? Uncomment and swap the
+command for its migrate step.
+
 ## Scope (v1)
 
 - **Turbo** monorepos — full support (`turbo prune` multi-stage builds).
 - **Nx** monorepos — supported via `nx build` + `dist/<projectRoot>` output. Node-server and static (Vite/Astro) apps are solid; Next/SSR Dockerfiles follow Nx conventions but are worth a glance before your first deploy.
 - **Fly.io** as the deploy target.
-- **No database provisioning** — databases are a separate concern; see the roadmap.
+- **No database provisioning** — deploykit provisions no database. It detects Prisma and writes a commented, opt-in migration hook (see [Database migrations](#database-migrations)); the database itself is yours to create and own.
 
 ## Security & Privacy
 
