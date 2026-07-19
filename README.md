@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/abrulic/deploykit/main/public/assets/images/deploykit-logo.png" alt="deploykit" width="180" height="180" />
+<img src="public/assets/images/deploykit-logo.png" alt="deploykit" width="180" height="180" />
 
 # deploykit
 
