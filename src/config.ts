@@ -135,10 +135,17 @@ export interface AppConfig {
   watchPaths: string[];
   environments: Partial<Record<EnvironmentKind, AppEnvironment>>;
   /**
-   * Environment variable *names* this app needs (never values). Wired through
-   * GitHub → Fly secrets in the workflow.
+   * *Runtime* environment variable names this app needs (never values). Wired
+   * through GitHub secrets → `flyctl secrets set` in the workflow.
    */
   secrets: string[];
+  /**
+   * *Build-time* variable names — values baked into the bundle during
+   * `docker build` (client-exposed prefixes like NEXT_PUBLIC_/VITE_, and every
+   * var of a static app, which has no runtime to read env from). Wired through
+   * GitHub secrets → `flyctl deploy --build-arg` + Dockerfile ARG/ENV.
+   */
+  buildEnv?: string[];
 }
 
 export interface DeploykitConfig {
@@ -146,6 +153,14 @@ export interface DeploykitConfig {
   packageManager: PackageManager;
   /** Node major version used in the generated Dockerfiles, e.g. "20". */
   nodeVersion: string;
+  /**
+   * Project prefix for every generated Fly app name (e.g. "acme-shop" →
+   * "acme-shop-web-staging"). Fly app names are **globally** unique across all
+   * Fly users, so bare names like "web-staging" are almost always taken.
+   * Defaults to the root package name / repo dir; omitted → no prefix
+   * (pre-prefix configs keep their old names).
+   */
+  namePrefix?: string;
   provider: ProviderConfig;
   /** Deployable apps keyed by their short name (last path segment). */
   apps: Record<string, AppConfig>;

@@ -196,7 +196,12 @@ export async function setGithubSecret({
   } satisfies StepResult;
 }
 
-/** Names of secrets already set at the repo or (with `env`) an environment. */
+/**
+ * Names of secrets already set at the repo or (with `env`) an environment.
+ * Returns null when the list can't be read — callers must not treat that as
+ * "no secrets" (e.g. the FLY_API_TOKEN guard would mint a duplicate org token
+ * on every run if an auth hiccup read as an empty list).
+ */
 export async function listGithubSecretNames({
   env,
   repo,
@@ -205,14 +210,14 @@ export async function listGithubSecretNames({
   env?: string;
   repo?: string | null;
   cwd: string;
-}): Promise<Set<string>> {
+}): Promise<Set<string> | null> {
   const args = ["secret", "list", "--json", "name", "-q", ".[].name"];
   if (env) args.push("--env", env);
   if (repo) args.push("--repo", repo);
-  const out = await tryExec({ cmd: "gh", args, cwd });
-  if (!out) return new Set();
+  const res = await exec({ cmd: "gh", args, cwd });
+  if (res.code !== 0) return null;
   return new Set(
-    out
+    res.stdout
       .split("\n")
       .map((s) => s.trim())
       .filter(Boolean),
@@ -254,7 +259,8 @@ export async function ensureGithubEnvironment({
 }) {
   const res = await exec({
     cmd: "gh",
-    args: ["api", "--method", "PUT", `/repos/${repo}/environments/${env}`],
+    // Environment names may contain spaces/slashes — encode them for the URL.
+    args: ["api", "--method", "PUT", `/repos/${repo}/environments/${encodeURIComponent(env)}`],
     cwd,
   });
   return res.code === 0;

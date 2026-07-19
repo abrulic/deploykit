@@ -32,7 +32,10 @@ describe("generateDockerfile (Nx)", () => {
 
   it("emits a Node runner that installs prod deps and runs main.js", () => {
     const out = gen("node-server");
-    expect(out).toContain("pnpm install --prod");
+    // The runner stage has no corepack enable, so the prod install must use
+    // npm (always present) — pnpm/yarn/bun aren't on PATH there.
+    expect(out).toContain("RUN npm install --omit=dev");
+    expect(out).not.toContain("pnpm install --prod");
     expect(out).toContain('CMD ["node", "main.js"]');
   });
 

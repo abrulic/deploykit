@@ -32,8 +32,9 @@ export const tryExec = async (input: ExecInput) => {
   return res.code === 0 ? res.stdout.trim() : null;
 };
 
-/** True if a command exists on PATH. */
+/** True if a command exists on PATH (`which` on POSIX, `where` on Windows). */
 export const commandExists = async (command: string) => {
-  const res = await exec({ cmd: "which", args: [command] });
+  const finder = process.platform === "win32" ? "where" : "which";
+  const res = await exec({ cmd: finder, args: [command] });
   return res.code === 0;
 };

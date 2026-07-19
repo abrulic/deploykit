@@ -146,14 +146,20 @@ function ensureGitignored(cwd: string, entry: string): boolean {
   }
 }
 
-/** Quote dotenv values that contain whitespace or comment/quote characters. */
+/**
+ * Quote dotenv values that contain whitespace, comment/quote characters or
+ * backslashes. Backslashes are escaped first so a value like `a\"b` survives
+ * the round-trip.
+ */
 function quote(value: string) {
-  return /[\s#"']/.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value;
+  return /[\s#"'\\]/.test(value)
+    ? `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`
+    : value;
 }
 
 /** Reverse of `quote` — strip surrounding double quotes and unescape. */
 function unquote(value: string) {
   return value.length >= 2 && value.startsWith('"') && value.endsWith('"')
-    ? value.slice(1, -1).replace(/\\"/g, '"')
+    ? value.slice(1, -1).replace(/\\(["\\])/g, "$1")
     : value;
 }

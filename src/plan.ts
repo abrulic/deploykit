@@ -25,6 +25,9 @@ export function renderPlan({ config, files, opts }: RenderPlanInput) {
     if (app.secrets.length) {
       lines.push(pc.dim(`      secrets: ${app.secrets.join(", ")}`));
     }
+    if (app.buildEnv?.length) {
+      lines.push(pc.dim(`      build-time: ${app.buildEnv.join(", ")}`));
+    }
   }
 
   lines.push("");
@@ -71,7 +74,10 @@ export function renderPlan({ config, files, opts }: RenderPlanInput) {
     if (hasEnv({ config, kind: "staging" }))
       lines.push(`  Create GitHub environment: staging`);
     if (hasEnv({ config, kind: "production" }))
-      lines.push(`  Create GitHub environment: production (required reviewers)`);
+      // Note: deploykit creates the environment but can't pick reviewers for
+      // you — the approval gate only exists once reviewers are added (surfaced
+      // again in next steps).
+      lines.push(`  Create GitHub environment: production`);
     const secrets = secretNames(config);
     if (secrets.length)
       lines.push(`  Set app secrets (per environment): ${secrets.join(", ")}`);
@@ -118,11 +124,16 @@ const hasEnv = ({
   kind: "staging" | "production";
 }) => Object.values(config.apps).some((a) => a.environments[kind]);
 
-/** Unique secret names across all configured apps. */
+/**
+ * Unique secret names across all configured apps — runtime secrets and
+ * build-time vars alike: both are stored as GitHub secrets (the workflow just
+ * forwards them differently: `flyctl secrets set` vs `--build-arg`).
+ */
 export function secretNames(config: DeploykitConfig) {
   const names = new Set<string>();
   for (const app of Object.values(config.apps)) {
     for (const s of app.secrets) names.add(s);
+    for (const b of app.buildEnv ?? []) names.add(b);
   }
   return [...names].sort();
 }

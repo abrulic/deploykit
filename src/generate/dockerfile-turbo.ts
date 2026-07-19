@@ -2,6 +2,7 @@ import type { DeploykitConfig, AppConfig } from "../config.js";
 import {
   PM,
   baseStage,
+  buildEnvLines,
   fileHeader,
   installLine,
   nodeImage,
@@ -36,7 +37,7 @@ COPY --from=prune /app/out/json/ .
 RUN ${installLine(pm, config)}
 # Then the pruned source, and build.
 COPY --from=prune /app/out/full/ .
-${prismaSteps(app, pm)}RUN ${pm.run} turbo run build --filter=${filter}
+${buildEnvLines(app)}${prismaSteps(app, pm)}RUN ${pm.run} turbo run build --filter=${filter}
 `;
 
   return head + "\n" + runner({ app, config }) + "\n";

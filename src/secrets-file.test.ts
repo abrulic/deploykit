@@ -120,4 +120,12 @@ describe("credentials file", () => {
     saveCredential(root, "X", "has spaces");
     expect(readCredential(root, "X")).toBe("has spaces");
   });
+
+  it("round-trips values with backslashes and escaped quotes", () => {
+    const root = setup();
+    for (const value of ['a\\"b', "back\\slash", 'ends with \\', '"quoted"']) {
+      saveCredential(root, "X", value);
+      expect(readCredential(root, "X")).toBe(value);
+    }
+  });
 });

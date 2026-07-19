@@ -26,6 +26,21 @@ describe("generateDockerfile", () => {
     expect(gen("next")).toContain("pnpm install --frozen-lockfile");
     const npmConfig: DeploykitConfig = { ...sampleConfig, packageManager: "npm" };
     expect(gen("next", npmConfig)).toContain("npx --yes turbo prune");
+    // Frozen install from the lockfile — `npm install` may rewrite it.
+    expect(gen("next", npmConfig)).toContain("RUN npm ci");
+  });
+
+  it("installs bun in the base stage (corepack doesn't provide it)", () => {
+    const bunConfig: DeploykitConfig = { ...sampleConfig, packageManager: "bun" };
+    const out = gen("next", bunConfig);
+    expect(out).toContain("RUN npm install -g bun");
+    expect(out).toContain("RUN bun install");
+    // bun must be installed before the workspace install runs.
+    expect(out.indexOf("npm install -g bun")).toBeLessThan(out.indexOf("RUN bun install"));
+  });
+
+  it("does not install bun for other package managers", () => {
+    expect(gen("next")).not.toContain("npm install -g bun");
   });
 
   it("emits a Next standalone runner", () => {
@@ -76,6 +91,19 @@ describe("generateDockerfile", () => {
     const out = generateDockerfile({ name: "app", app: appWith("node-server"), config });
     expect(out).toContain("RUN HUSKY=0 pnpm install --frozen-lockfile");
     expect(out).not.toContain("--ignore-scripts");
+  });
+
+  it("declares build-time vars as ARG/ENV before the build step", () => {
+    const app: AppConfig = {
+      ...appWith("vite"),
+      serve: "static",
+      buildEnv: ["VITE_API_URL", "VITE_SENTRY_DSN"],
+    };
+    const out = generateDockerfile({ name: "app", app, config: sampleConfig });
+    expect(out).toContain("ARG VITE_API_URL\nENV VITE_API_URL=$VITE_API_URL");
+    expect(out).toContain("ARG VITE_SENTRY_DSN");
+    // Declared before the build runs, so the bundle sees the values.
+    expect(out.indexOf("ARG VITE_API_URL")).toBeLessThan(out.indexOf("turbo run build"));
   });
 
   it("honors an explicit startCommand for a server app", () => {

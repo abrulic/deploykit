@@ -9,8 +9,6 @@ export interface PmCommands {
   dlx: string;
   /** Frozen install from the lockfile. */
   install: string;
-  /** Production-only install (no lockfile assumed — used on pruned output). */
-  installProd: string;
 }
 
 export const PM: Record<PackageManager, PmCommands> = {
@@ -19,28 +17,24 @@ export const PM: Record<PackageManager, PmCommands> = {
     exec: "pnpm exec",
     dlx: "pnpm dlx",
     install: "pnpm install --frozen-lockfile",
-    installProd: "pnpm install --prod",
   },
   npm: {
     run: "npx",
     exec: "npx",
     dlx: "npx --yes",
-    install: "npm install",
-    installProd: "npm install --omit=dev",
+    install: "npm ci",
   },
   yarn: {
     run: "yarn",
     exec: "yarn exec",
     dlx: "yarn dlx",
     install: "yarn install --frozen-lockfile",
-    installProd: "yarn install --production",
   },
   bun: {
     run: "bunx",
     exec: "bunx",
     dlx: "bunx",
     install: "bun install",
-    installProd: "bun install --production",
   },
 };
 
@@ -81,6 +75,18 @@ export const installLine = (pm: PmCommands, config: DeploykitConfig) => {
 };
 
 /**
+ * ARG/ENV lines for the app's build-time vars (NEXT_PUBLIC_*, VITE_*, and all
+ * vars of a static app). Declared in the build stage so `--build-arg` values
+ * from CI are visible to the framework build and baked into the bundle —
+ * setting them as Fly *runtime* secrets would be too late for these.
+ */
+export const buildEnvLines = (app: AppConfig): string => {
+  const names = app.buildEnv ?? [];
+  if (names.length === 0) return "";
+  return `${names.map((n) => `ARG ${n}\nENV ${n}=$${n}`).join("\n")}\n`;
+};
+
+/**
  * `prisma generate` lines for every Prisma package in the app's closure. The
  * client isn't generated on install under pnpm 10 / Prisma 7, and workspace
  * packages fail to build without it. A throwaway build-time DATABASE_URL is set
@@ -112,12 +118,18 @@ export const serverCmd = (app: AppConfig): string =>
 export const nodeImage = (config: DeploykitConfig) =>
   `node:${config.nodeVersion}-slim`;
 
-/** Shared base stage: node image + corepack for pnpm/yarn. */
-export const baseStage = (config: DeploykitConfig) => `FROM ${nodeImage(
-  config,
-)} AS base
+/**
+ * Shared base stage: node image + corepack for pnpm/yarn. Corepack does not
+ * manage bun, so a bun workspace installs it explicitly (bun's npm package
+ * ships the binary — no curl needed on the slim image).
+ */
+export const baseStage = (config: DeploykitConfig) => {
+  const bun =
+    config.packageManager === "bun" ? "\nRUN npm install -g bun" : "";
+  return `FROM ${nodeImage(config)} AS base
 ENV PNPM_HOME="/pnpm" PATH="/pnpm:$PATH"
-RUN corepack enable || true`;
+RUN corepack enable || true${bun}`;
+};
 
 /** Shared runner-stage header: image, workdir, env, non-root user, port. */
 export const runnerHeader = ({ node, port }: { node: string; port: number }) =>

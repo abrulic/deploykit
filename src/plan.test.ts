@@ -27,16 +27,21 @@ describe("flyAppNames", () => {
 });
 
 describe("secretNames", () => {
-  it("returns the sorted union of app secrets", () => {
-    // web: DATABASE_URL, NEXTAUTH_SECRET; api: none
-    expect(secretNames(sampleConfig)).toEqual(["DATABASE_URL", "NEXTAUTH_SECRET"]);
+  it("returns the sorted union of runtime secrets and build-time vars", () => {
+    // web: DATABASE_URL, NEXTAUTH_SECRET + build-time NEXT_PUBLIC_API_URL; api: none.
+    // Build vars are GitHub secrets too — they just flow via --build-arg.
+    expect(secretNames(sampleConfig)).toEqual([
+      "DATABASE_URL",
+      "NEXTAUTH_SECRET",
+      "NEXT_PUBLIC_API_URL",
+    ]);
   });
 
   it("dedupes names shared across apps", () => {
     const config: DeploykitConfig = {
       ...sampleConfig,
       apps: {
-        web: { ...sampleWebApp, secrets: ["A", "B"] },
+        web: { ...sampleWebApp, secrets: ["A", "B"], buildEnv: [] },
         api: { ...sampleConfig.apps.api!, secrets: ["B", "C"] },
       },
     };

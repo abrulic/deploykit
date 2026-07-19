@@ -9,7 +9,7 @@ import type {
 } from "./config.js";
 import { DEFAULT_PORTS } from "./config.js";
 import {
-  expandWorkspaceGlob,
+  expandWorkspaceGlobs,
   fileExists,
   findFilesByName,
   listDir,
@@ -57,7 +57,10 @@ export interface DetectedApp {
   internalDeps: string[];
   /** Globs that should trigger a redeploy: own dir + every internal dep dir. */
   watchPaths: string[];
+  /** Runtime env var names (staged as Fly secrets by the workflow). */
   secrets: string[];
+  /** Build-time var names (passed as --build-arg; baked into the bundle). */
+  buildEnv: string[];
   hasDockerfile: boolean;
   hasFlyToml: boolean;
 }
@@ -75,6 +78,8 @@ export interface Detection {
   apps: DetectedApp[];
   libs: DetectedLib[];
   hasExistingWorkflows: boolean;
+  /** Non-fatal problems worth surfacing before generating files. */
+  warnings: string[];
   /** Env to neutralize `prepare` git-hook installers during the Docker install. */
   installEnv?: Record<string, string>;
   /** Nx only: true = integrated (project.json); false = package-based. */
@@ -104,9 +109,16 @@ const ENV_DENYLIST = new Set([
 ]);
 
 export function detect(cwd: string): Detection {
-  const tool: MonorepoTool = fileExists(join(cwd, "turbo.json"))
-    ? "turbo"
-    : "nx";
+  // Preflight checks this too, but detect() is a public entry point — fail
+  // loudly rather than silently assuming Nx when neither tool file exists.
+  const hasTurbo = fileExists(join(cwd, "turbo.json"));
+  const hasNx = fileExists(join(cwd, "nx.json"));
+  if (!hasTurbo && !hasNx) {
+    throw new Error(
+      `No monorepo tool found in ${cwd} (looked for turbo.json / nx.json).`,
+    );
+  }
+  const tool: MonorepoTool = hasTurbo ? "turbo" : "nx";
   const packageManager = detectPackageManager(cwd);
 
   const { apps, libs, nxIntegrated } = detectProjects({ cwd, tool });
@@ -141,6 +153,7 @@ export function detect(cwd: string): Detection {
     apps,
     libs,
     hasExistingWorkflows,
+    warnings: detectWarnings({ cwd, apps }),
   };
   const installEnv = detectInstallEnv(cwd);
   if (installEnv) detection.installEnv = installEnv;
@@ -171,12 +184,9 @@ function detectPackageProjects({
   cwd: string;
   tool: MonorepoTool;
 }): Projects {
-  const dirs = new Set<string>();
-  for (const pattern of workspaceGlobs(cwd)) {
-    for (const dir of expandWorkspaceGlob({ root: cwd, pattern })) {
-      dirs.add(toPosix(dir));
-    }
-  }
+  const dirs = new Set<string>(
+    expandWorkspaceGlobs({ root: cwd, patterns: workspaceGlobs(cwd) }).map(toPosix),
+  );
 
   const raw = readPackages({ cwd, dirs });
   const byName = new Map(raw.map((r) => [r.name, r]));
@@ -214,6 +224,10 @@ function detectPackageProjects({
       tool,
     });
 
+    const { secrets, buildEnv } = splitEnvVars(
+      detectSecrets({ cwd, appDir: r.dir, depDirs }),
+      serveInfo.serve,
+    );
     apps.push({
       name: lastSegment(r.dir),
       root: r.dir,
@@ -229,7 +243,8 @@ function detectPackageProjects({
         "package.json",
         `${tool}.json`,
       ],
-      secrets: detectSecrets({ cwd, appDir: r.dir }),
+      secrets,
+      buildEnv,
       hasDockerfile: fileExists(join(cwd, r.dir, "Dockerfile")),
       hasFlyToml: fileExists(join(cwd, r.dir, "fly.toml")),
     });
@@ -276,6 +291,10 @@ function detectNxProjects({ cwd }: { cwd: string }): Projects {
       tool: "nx",
     });
 
+    const { secrets, buildEnv } = splitEnvVars(
+      detectSecrets({ cwd, appDir: root, depDirs }),
+      serveInfo.serve,
+    );
     apps.push({
       name: lastSegment(root),
       root,
@@ -291,7 +310,8 @@ function detectNxProjects({ cwd }: { cwd: string }): Projects {
         "package.json",
         "nx.json",
       ],
-      secrets: detectSecrets({ cwd, appDir: root }),
+      secrets,
+      buildEnv,
       hasDockerfile: fileExists(join(cwd, root, "Dockerfile")),
       hasFlyToml: fileExists(join(cwd, root, "fly.toml")),
     });
@@ -545,6 +565,33 @@ function detectPrismaTargets({
 }
 
 /**
+ * Non-fatal problems the user should hear about *before* the first deploy
+ * fails. Currently: Next apps whose config doesn't set `output: "standalone"`,
+ * which the generated Dockerfile's runner stage requires.
+ */
+function detectWarnings({
+  cwd,
+  apps,
+}: {
+  cwd: string;
+  apps: DetectedApp[];
+}): string[] {
+  const warnings: string[] = [];
+  for (const app of apps) {
+    if (app.framework !== "next") continue;
+    const config = ["next.config.ts", "next.config.mjs", "next.config.js", "next.config.cjs"]
+      .map((f) => readText(join(cwd, app.root, f)))
+      .find((t) => t !== null);
+    if (!config || !/\boutput\s*:\s*["']standalone["']/.test(config)) {
+      warnings.push(
+        `${app.name}: the generated Dockerfile needs \`output: "standalone"\` in ${app.root}/next.config.* — add it before the first deploy.`,
+      );
+    }
+  }
+  return warnings;
+}
+
+/**
  * Env that neutralizes a `prepare` git-hook installer during the Docker install.
  * These hooks (lefthook/husky) shell out to `git`, which the slim image lacks
  * and `.dockerignore` strips — so disable the installer rather than adding git.
@@ -573,7 +620,21 @@ function transitiveDeps(start: string, byName: Map<string, RawPackage>) {
   return [...seen].sort();
 }
 
-function detectSecrets({ cwd, appDir }: { cwd: string; appDir: string }) {
+/**
+ * Env var names an app needs: keys from example env files (root + app dir) and
+ * `process.env.X` / `import.meta.env.X` references in the app's own source
+ * **and its internal workspace deps** — a server whose DATABASE_URL read lives
+ * in packages/db still needs the secret.
+ */
+function detectSecrets({
+  cwd,
+  appDir,
+  depDirs = [],
+}: {
+  cwd: string;
+  appDir: string;
+  depDirs?: string[];
+}) {
   const names = new Set<string>();
   const envFiles = [
     ".env.example",
@@ -592,22 +653,43 @@ function detectSecrets({ cwd, appDir }: { cwd: string; appDir: string }) {
     }
   }
 
-  const files = walkFilesByExt({
-    root: cwd,
-    subdir: appDir,
-    exts: ["ts", "tsx", "js", "jsx", "mjs"],
-    limit: 200,
-  });
-  for (const f of files) {
-    const text = readText(join(cwd, f));
-    if (!text) continue;
-    const re = /process\.env\.([A-Z][A-Z0-9_]*)/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(text))) {
-      if (m[1]) names.add(m[1]);
+  for (const dir of [appDir, ...depDirs]) {
+    const files = walkFilesByExt({
+      root: cwd,
+      subdir: dir,
+      exts: ["ts", "tsx", "js", "jsx", "mjs"],
+      limit: 200,
+    });
+    for (const f of files) {
+      const text = readText(join(cwd, f));
+      if (!text) continue;
+      const re = /(?:process\.env|import\.meta\.env)\.([A-Z][A-Z0-9_]*)/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(text))) {
+        if (m[1]) names.add(m[1]);
+      }
     }
   }
   return [...names].filter((n) => !ENV_DENYLIST.has(n)).sort();
+}
+
+/** Prefixes frameworks expose to client bundles — their values bake in at build. */
+const BUILD_ENV_PREFIXES = ["NEXT_PUBLIC_", "VITE_", "PUBLIC_", "REACT_APP_"];
+
+/**
+ * Split detected env var names into runtime secrets vs build-time vars. A
+ * static app has no server process, so *everything* it reads is build-time;
+ * a server app bakes only the client-exposed prefixes and reads the rest at
+ * runtime via Fly secrets.
+ */
+export function splitEnvVars(
+  names: string[],
+  serve: ServeModel,
+): { secrets: string[]; buildEnv: string[] } {
+  if (serve === "static") return { secrets: [], buildEnv: names };
+  const buildEnv = names.filter((n) => BUILD_ENV_PREFIXES.some((p) => n.startsWith(p)));
+  const secrets = names.filter((n) => !buildEnv.includes(n));
+  return { secrets, buildEnv };
 }
 
 const lastSegment = (p: string) => p.split("/").at(-1) ?? p;

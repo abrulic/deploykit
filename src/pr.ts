@@ -1,9 +1,11 @@
-import { exec } from "./util/exec.js";
+import { exec, tryExec } from "./util/exec.js";
 
 export interface PrResult {
   ok: boolean;
   url?: string;
   detail?: string;
+  /** Branch the working tree was returned to, when it was switched back. */
+  restoredTo?: string;
 }
 
 const BRANCH = "deploykit/ci-setup";
@@ -18,18 +20,35 @@ const PR_BODY = [
   "Review the generated Dockerfiles, fly.toml files and workflow before merging.",
 ].join("\n");
 
-const fail = (detail: string) => ({ ok: false, url: undefined, detail });
-const succeed = (url: string) => ({ ok: true, url, detail: undefined });
-
 /**
  * Commit the generated files on a branch and open a PR. Assumes `gh` is
- * authenticated and the repo has a GitHub remote.
+ * authenticated and the repo has a GitHub remote. The working tree is returned
+ * to the branch the user started on — success or failure — so the run doesn't
+ * leave them stranded on the setup branch.
  */
-export async function openPr({ cwd, paths }: { cwd: string; paths: string[] }) {
-  if (paths.length === 0) return fail("nothing to commit");
+export async function openPr({ cwd, paths }: { cwd: string; paths: string[] }): Promise<PrResult> {
+  if (paths.length === 0) return { ok: false, detail: "nothing to commit" };
+
+  // Remember where the user was; "HEAD" means detached (nothing to restore to).
+  const original = await tryExec({
+    cmd: "git",
+    args: ["rev-parse", "--abbrev-ref", "HEAD"],
+    cwd,
+  });
+
+  const restore = async (): Promise<string | undefined> => {
+    if (!original || original === "HEAD" || original === BRANCH) return undefined;
+    const res = await exec({ cmd: "git", args: ["checkout", original], cwd });
+    return res.code === 0 ? original : undefined;
+  };
+  const fail = async (detail: string): Promise<PrResult> => ({
+    ok: false,
+    detail,
+    restoredTo: await restore(),
+  });
 
   const onBranch = await switchToBranch(cwd);
-  if (!onBranch.ok) return fail(onBranch.detail ?? "could not switch branch");
+  if (!onBranch.ok) return { ok: false, detail: onBranch.detail ?? "could not switch branch" };
 
   const add = await exec({ cmd: "git", args: ["add", ...paths], cwd });
   if (add.code !== 0) return fail(`git add failed: ${add.stderr.trim()}`);
@@ -55,7 +74,7 @@ export async function openPr({ cwd, paths }: { cwd: string; paths: string[] }) {
   });
   if (pr.code !== 0) return fail(`gh pr create failed: ${pr.stderr.trim()}`);
 
-  return succeed(pr.stdout.trim());
+  return { ok: true, url: pr.stdout.trim(), restoredTo: await restore() };
 }
 
 /** Create the setup branch, or switch to it if it already exists. */

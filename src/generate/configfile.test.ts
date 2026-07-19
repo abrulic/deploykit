@@ -5,8 +5,10 @@ import { generateConfigFile } from "./configfile.js";
 describe("generateConfigFile", () => {
   const out = generateConfigFile(sampleConfig);
 
-  it("imports and calls defineConfig", () => {
-    expect(out).toContain('import { defineConfig } from "deploykit"');
+  it("imports defineConfig from the real published package name", () => {
+    expect(out).toContain(
+      'import { defineConfig } from "@alminabrulic/deploykit"',
+    );
     expect(out).toContain("export default defineConfig(");
   });
 
