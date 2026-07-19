@@ -17,7 +17,11 @@ const appWith = (framework: Framework): AppConfig => ({
 });
 
 const gen = (framework: Framework) =>
-  generateDockerfile({ name: "app", app: appWith(framework), config: nxConfig });
+  generateDockerfile({
+    name: "app",
+    app: appWith(framework),
+    config: nxConfig,
+  });
 
 describe("generateDockerfile (Nx)", () => {
   it("builds via `nx build <project>` instead of turbo prune", () => {
@@ -63,11 +67,20 @@ describe("generateDockerfile (Nx, package-based / server model)", () => {
     environments: {},
     secrets: [],
     prisma: [
-      { packageName: "@acme/db", root: "packages/db", schema: "prisma/schema.prisma", hasConfig: true },
+      {
+        packageName: "@acme/db",
+        root: "packages/db",
+        schema: "prisma/schema.prisma",
+        hasConfig: true,
+      },
     ],
   };
 
-  const out = generateDockerfile({ name: "storefront-app", app: serverApp, config: pkgBasedConfig });
+  const out = generateDockerfile({
+    name: "storefront-app",
+    app: serverApp,
+    config: pkgBasedConfig,
+  });
 
   it("ships the built workspace and runs the app's start script", () => {
     expect(out).toContain("COPY --from=build --chown=appuser:nodejs /app ./");
@@ -88,7 +101,9 @@ describe("generateDockerfile (Nx, package-based / server model)", () => {
       app: serverApp,
       config: { ...pkgBasedConfig, installEnv: { LEFTHOOK: "0" } },
     });
-    expect(withEnv).toContain("RUN pnpm install --frozen-lockfile --ignore-scripts");
+    expect(withEnv).toContain(
+      "RUN pnpm install --frozen-lockfile --ignore-scripts",
+    );
     expect(withEnv).toContain(
       'RUN cd packages/db && DATABASE_URL="postgresql://build:build@localhost:5432/build" pnpm exec prisma generate',
     );

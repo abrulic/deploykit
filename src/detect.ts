@@ -126,13 +126,19 @@ export function detect(cwd: string): Detection {
   libs.sort((a, b) => a.name.localeCompare(b.name));
 
   // Node version depends on the apps' own engines, so resolve it after detection.
-  const nodeVersion = detectNodeVersion({ cwd, appRoots: apps.map((a) => a.root) });
+  const nodeVersion = detectNodeVersion({
+    cwd,
+    appRoots: apps.map((a) => a.root),
+  });
 
   // Prisma: scan every package once, then assign each app the targets that fall
   // inside its dependency closure (keeps `turbo prune` honest for multi-db repos).
   const prismaTargets = detectPrismaTargets({
     cwd,
-    roots: [...apps, ...libs].map((p) => ({ packageName: p.packageName, root: p.root })),
+    roots: [...apps, ...libs].map((p) => ({
+      packageName: p.packageName,
+      root: p.root,
+    })),
   });
   if (prismaTargets.length) {
     for (const app of apps) {
@@ -185,7 +191,9 @@ function detectPackageProjects({
   tool: MonorepoTool;
 }): Projects {
   const dirs = new Set<string>(
-    expandWorkspaceGlobs({ root: cwd, patterns: workspaceGlobs(cwd) }).map(toPosix),
+    expandWorkspaceGlobs({ root: cwd, patterns: workspaceGlobs(cwd) }).map(
+      toPosix,
+    ),
   );
 
   const raw = readPackages({ cwd, dirs });
@@ -255,15 +263,20 @@ function detectPackageProjects({
 
 // ── Nx detection (integrated repos, via project.json) ────────────────────────
 function detectNxProjects({ cwd }: { cwd: string }): Projects {
-  const projects = findFilesByName({ root: cwd, filename: "project.json", limit: 1000 })
+  const projects = findFilesByName({
+    root: cwd,
+    filename: "project.json",
+    limit: 1000,
+  })
     .map((file) => {
       const proj = readJson<NxProjectJson>(join(cwd, file));
       if (!proj) return null;
       const root = toPosix(dirname(file));
       return { proj, root, name: proj.name ?? lastSegment(root) };
     })
-    .filter((p): p is { proj: NxProjectJson; root: string; name: string } =>
-      p !== null,
+    .filter(
+      (p): p is { proj: NxProjectJson; root: string; name: string } =>
+        p !== null,
     );
 
   const rootByName = new Map(projects.map((p) => [p.name, p.root]));
@@ -362,7 +375,12 @@ function detectPackageManager(cwd: string): PackageManager {
   // 1. The authoritative `packageManager` field, e.g. "pnpm@9.0.0".
   const pkg = readJson<PackageJson>(join(cwd, "package.json"));
   const field = pkg?.packageManager?.split("@")[0];
-  if (field === "pnpm" || field === "yarn" || field === "npm" || field === "bun")
+  if (
+    field === "pnpm" ||
+    field === "yarn" ||
+    field === "npm" ||
+    field === "bun"
+  )
     return field;
 
   // 2. Lockfiles.
@@ -383,15 +401,26 @@ function detectPackageManager(cwd: string): PackageManager {
  * `engines.node`, and every app's own `engines.node` — an app that needs Node
  * 22 must not be built on the root's Node 20. Defaults to "20".
  */
-function detectNodeVersion({ cwd, appRoots }: { cwd: string; appRoots: string[] }) {
+function detectNodeVersion({
+  cwd,
+  appRoots,
+}: {
+  cwd: string;
+  appRoots: string[];
+}) {
   const majors: number[] = [];
 
   const nvmrc = readText(join(cwd, ".nvmrc"));
-  const fromNvmrc = nvmrc?.trim().replace(/^v/, "").match(/^(\d+)/)?.[1];
+  const fromNvmrc = nvmrc
+    ?.trim()
+    .replace(/^v/, "")
+    .match(/^(\d+)/)?.[1];
   if (fromNvmrc) majors.push(Number(fromNvmrc));
 
   const enginesMajor = (dir: string) =>
-    readJson<PackageJson>(join(dir, "package.json"))?.engines?.node?.match(/(\d+)/)?.[1];
+    readJson<PackageJson>(join(dir, "package.json"))?.engines?.node?.match(
+      /(\d+)/,
+    )?.[1];
   const root = enginesMajor(cwd);
   if (root) majors.push(Number(root));
   for (const appRoot of appRoots) {
@@ -478,9 +507,16 @@ function detectServeModel({
   tool: MonorepoTool;
 }): ServeInfo {
   // Nx integrated writes to dist/<root>; turbo / package-based write in the pkg dir.
-  const staticBase = tool === "nx" && nxIntegrated ? `dist/${root}` : `${root}/dist`;
-  const deps = { ...(pkg?.dependencies ?? {}), ...(pkg?.devDependencies ?? {}) };
-  const server = (startCommand?: string[]): ServeInfo => ({ serve: "server", startCommand });
+  const staticBase =
+    tool === "nx" && nxIntegrated ? `dist/${root}` : `${root}/dist`;
+  const deps = {
+    ...(pkg?.dependencies ?? {}),
+    ...(pkg?.devDependencies ?? {}),
+  };
+  const server = (startCommand?: string[]): ServeInfo => ({
+    serve: "server",
+    startCommand,
+  });
 
   switch (framework) {
     case "next":
@@ -505,7 +541,11 @@ function detectServeModel({
 
     default:
       // vite | static — a client-only SPA / static site.
-      return { serve: "static", outputDir: staticBase, spa: framework === "vite" };
+      return {
+        serve: "static",
+        outputDir: staticBase,
+        spa: framework === "vite",
+      };
   }
 }
 
@@ -529,7 +569,11 @@ function reactRouterSsr(appAbs?: string): boolean {
 function resolveStartCommand(framework: Framework): string[] | undefined {
   // react-router-serve is the SSR server; run its bin directly with node.
   if (framework === "react-router")
-    return ["node", "node_modules/@react-router/serve/bin.js", "./build/server/index.js"];
+    return [
+      "node",
+      "node_modules/@react-router/serve/bin.js",
+      "./build/server/index.js",
+    ];
   if (framework === "astro") return ["node", "./dist/server/entry.mjs"];
   return undefined;
 }
@@ -555,10 +599,18 @@ function detectPrismaTargets({
       fileExists(join(base, "prisma.config.ts")) ||
       fileExists(join(base, "prisma.config.js"));
     const pkg = readJson<PackageJson>(join(base, "package.json"));
-    const deps = { ...(pkg?.dependencies ?? {}), ...(pkg?.devDependencies ?? {}) };
+    const deps = {
+      ...(pkg?.dependencies ?? {}),
+      ...(pkg?.devDependencies ?? {}),
+    };
     const hasDeps = Boolean(deps.prisma) && Boolean(deps["@prisma/client"]);
     if (hasSchema || hasConfig || hasDeps) {
-      targets.push({ packageName, root, schema: "prisma/schema.prisma", hasConfig });
+      targets.push({
+        packageName,
+        root,
+        schema: "prisma/schema.prisma",
+        hasConfig,
+      });
     }
   }
   return targets;
@@ -579,7 +631,12 @@ function detectWarnings({
   const warnings: string[] = [];
   for (const app of apps) {
     if (app.framework !== "next") continue;
-    const config = ["next.config.ts", "next.config.mjs", "next.config.js", "next.config.cjs"]
+    const config = [
+      "next.config.ts",
+      "next.config.mjs",
+      "next.config.js",
+      "next.config.cjs",
+    ]
       .map((f) => readText(join(cwd, app.root, f)))
       .find((t) => t !== null);
     if (!config || !/\boutput\s*:\s*["']standalone["']/.test(config)) {
@@ -597,7 +654,8 @@ function detectWarnings({
  * and `.dockerignore` strips — so disable the installer rather than adding git.
  */
 function detectInstallEnv(cwd: string): Record<string, string> | undefined {
-  const prepare = readJson<PackageJson>(join(cwd, "package.json"))?.scripts?.prepare;
+  const prepare = readJson<PackageJson>(join(cwd, "package.json"))?.scripts
+    ?.prepare;
   if (!prepare) return undefined;
   const env: Record<string, string> = {};
   if (/lefthook/.test(prepare)) env.LEFTHOOK = "0";
@@ -687,7 +745,9 @@ export function splitEnvVars(
   serve: ServeModel,
 ): { secrets: string[]; buildEnv: string[] } {
   if (serve === "static") return { secrets: [], buildEnv: names };
-  const buildEnv = names.filter((n) => BUILD_ENV_PREFIXES.some((p) => n.startsWith(p)));
+  const buildEnv = names.filter((n) =>
+    BUILD_ENV_PREFIXES.some((p) => n.startsWith(p)),
+  );
   const secrets = names.filter((n) => !buildEnv.includes(n));
   return { secrets, buildEnv };
 }

@@ -1,6 +1,7 @@
 import type { DeploykitConfig, EnvironmentKind } from "../config.js";
 
 /** Render a GitHub Actions expression: gh("secrets.X") -> "${{ secrets.X }}". */
+// biome-ignore lint/style/useTemplate: a template literal collides with the `${{` GitHub Actions delimiter
 const gh = (expr: string) => "${{ " + expr + " }}";
 
 export function generateWorkflow(config: DeploykitConfig): string {
@@ -17,7 +18,11 @@ export function generateWorkflow(config: DeploykitConfig): string {
 
   const jobs: string[] = [];
   if (needChanges) jobs.push(changesJob(config));
-  if (hasPreview) jobs.push(previewJob({ config, prefix }), teardownJob({ appNames, prefix }));
+  if (hasPreview)
+    jobs.push(
+      previewJob({ config, prefix }),
+      teardownJob({ appNames, prefix }),
+    );
   if (hasStaging) jobs.push(stagingJob({ config, prefix }));
   if (hasProduction) jobs.push(productionJob({ config, appNames, prefix }));
 
@@ -85,7 +90,13 @@ ${filters}
 }
 
 // ── preview: deploy one app per PR ───────────────────────────────────────────
-function previewJob({ config, prefix }: { config: DeploykitConfig; prefix: string }): string {
+function previewJob({
+  config,
+  prefix,
+}: {
+  config: DeploykitConfig;
+  prefix: string;
+}): string {
   const flyApp = `"${prefix}$APP-pr-${gh("github.event.number")}"`;
   return `  preview:
     needs: changes
@@ -123,7 +134,13 @@ ${deployStep({ config, env: "preview", flyAppExpr: flyApp, singleMachine: true }
 }
 
 // ── teardown: destroy preview apps when the PR closes ────────────────────────
-function teardownJob({ appNames, prefix }: { appNames: string[]; prefix: string }): string {
+function teardownJob({
+  appNames,
+  prefix,
+}: {
+  appNames: string[];
+  prefix: string;
+}): string {
   return `  teardown:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
     runs-on: ubuntu-latest
@@ -142,7 +159,13 @@ function teardownJob({ appNames, prefix }: { appNames: string[]; prefix: string 
 }
 
 // ── staging: deploy affected apps on merge to main ───────────────────────────
-function stagingJob({ config, prefix }: { config: DeploykitConfig; prefix: string }): string {
+function stagingJob({
+  config,
+  prefix,
+}: {
+  config: DeploykitConfig;
+  prefix: string;
+}): string {
   return `  staging:
     needs: changes
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.apps != '[]'
@@ -196,7 +219,13 @@ interface DeployStepInput {
   gated?: boolean;
 }
 
-function deployStep({ config, env, flyAppExpr, singleMachine, gated = false }: DeployStepInput) {
+function deployStep({
+  config,
+  env,
+  flyAppExpr,
+  singleMachine,
+  gated = false,
+}: DeployStepInput) {
   const haFlag = singleMachine ? " --ha=false" : "";
   // Note: inside `if:` the expression is already an implicit ${{ }} context,
   // so matrix.app must be bare here (not wrapped).

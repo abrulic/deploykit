@@ -6,12 +6,13 @@ import {
   flyAppNames,
   mergeSecretTargets,
   renderPlan,
+  type SecretTarget,
   secretNames,
   secretTargets,
-  type SecretTarget,
 } from "../plan.js";
-import { preflight } from "../preflight.js";
 import { openPr } from "../pr.js";
+import { preflight } from "../preflight.js";
+import { buildConfig, type InitOptions } from "../prompts.js";
 import {
   createFlyApps,
   createFlyOrgToken,
@@ -21,12 +22,11 @@ import {
   listFlyApps,
   listGithubEnvironments,
   listGithubSecretNames,
-  setGithubSecret,
   type StepResult,
+  setGithubSecret,
 } from "../provision.js";
-import { provisionCloudflare, domainTargets } from "../provision-cloudflare.js";
-import { buildConfig, type InitOptions } from "../prompts.js";
-import { saveSecretsFile, type SecretGroup } from "../secrets-file.js";
+import { domainTargets, provisionCloudflare } from "../provision-cloudflare.js";
+import { type SecretGroup, saveSecretsFile } from "../secrets-file.js";
 import { pc } from "../util/log.js";
 
 /** Accumulates plaintext secret values set during a run for optional local export. */
@@ -148,13 +148,16 @@ async function runProvisioning({
   // Resolve the repo once — needed for token, environments, and secrets.
   const repo = ghReady ? await getRepo(opts.cwd) : null;
   if (ghReady && !repo) {
-    p.log.warn("Couldn't resolve the GitHub repo (gh repo view) — skipping GitHub steps.");
+    p.log.warn(
+      "Couldn't resolve the GitHub repo (gh repo view) — skipping GitHub steps.",
+    );
   }
 
   await provisionFlyApps({ config, opts, flyReady });
   // Cloudflare certs need the Fly apps to exist first, so this runs after.
   await provisionCloudflareStep({ config, opts, flyReady });
-  if (flyReady && repo) await provisionFlyToken({ config, opts, repo, capture });
+  if (flyReady && repo)
+    await provisionFlyToken({ config, opts, repo, capture });
   if (repo) await provisionEnvironments({ config, opts, repo });
   if (repo) await provisionSecrets({ config, opts, repo, capture });
 
@@ -184,7 +187,9 @@ async function provisionCloudflareStep({
     return;
   }
   if (!flyReady) {
-    p.log.warn("Skipping Cloudflare — flyctl isn't authenticated (needed to issue Fly certs).");
+    p.log.warn(
+      "Skipping Cloudflare — flyctl isn't authenticated (needed to issue Fly certs).",
+    );
     return;
   }
   const targets = domainTargets(config);
@@ -233,18 +238,30 @@ async function provisionFlyApps({
   if (wanted.length === 0) return;
 
   const existing = await listFlyApps(opts.cwd);
-  const missing = existing ? wanted.filter((n) => !existing.includes(n)) : wanted;
+  const missing = existing
+    ? wanted.filter((n) => !existing.includes(n))
+    : wanted;
   if (existing && missing.length === 0) {
     p.log.info(`Fly apps already exist — skipping (${wanted.join(", ")}).`);
     return;
   }
-  if (!(await confirm({ opts, message: `Create Fly app(s) (${missing.join(", ")})?` }))) return;
+  if (
+    !(await confirm({
+      opts,
+      message: `Create Fly app(s) (${missing.join(", ")})?`,
+    }))
+  )
+    return;
 
   const s = p.spinner();
   s.start("Creating Fly apps");
   report({
     spinner: s,
-    results: await createFlyApps({ names: missing, org: config.provider.org, cwd: opts.cwd }),
+    results: await createFlyApps({
+      names: missing,
+      org: config.provider.org,
+      cwd: opts.cwd,
+    }),
   });
 }
 
@@ -276,13 +293,21 @@ async function provisionFlyToken({
     p.log.info("FLY_API_TOKEN already set — skipping (delete it to rotate).");
     return;
   }
-  if (!(await confirm({ opts, message: "Create a Fly deploy token and set FLY_API_TOKEN?" }))) {
+  if (
+    !(await confirm({
+      opts,
+      message: "Create a Fly deploy token and set FLY_API_TOKEN?",
+    }))
+  ) {
     return;
   }
 
   const s = p.spinner();
   s.start("Creating Fly deploy token");
-  const tok = await createFlyOrgToken({ org: config.provider.org, cwd: opts.cwd });
+  const tok = await createFlyOrgToken({
+    org: config.provider.org,
+    cwd: opts.cwd,
+  });
   if (!tok.ok || !tok.token) {
     s.stop(pc.red(`Fly token: ${tok.detail ?? "failed"}`));
     return;
@@ -295,7 +320,9 @@ async function provisionFlyToken({
   });
   s.stop(
     res.ok
-      ? pc.green("✔ Created Fly deploy token (visible under Fly → Tokens) + set FLY_API_TOKEN")
+      ? pc.green(
+          "✔ Created Fly deploy token (visible under Fly → Tokens) + set FLY_API_TOKEN",
+        )
       : pc.red(`FLY_API_TOKEN: ${res.detail ?? "failed"}`),
   );
   if (res.ok) capture("Fly", "FLY_API_TOKEN", tok.token);
@@ -312,24 +339,38 @@ async function provisionEnvironments({
   repo: string;
 }) {
   const kinds: string[] = [];
-  if (Object.values(config.apps).some((a) => a.environments.staging)) kinds.push("staging");
-  if (Object.values(config.apps).some((a) => a.environments.production)) kinds.push("production");
+  if (Object.values(config.apps).some((a) => a.environments.staging))
+    kinds.push("staging");
+  if (Object.values(config.apps).some((a) => a.environments.production))
+    kinds.push("production");
   if (kinds.length === 0) return;
 
-  const existing = new Set((await listGithubEnvironments({ repo, cwd: opts.cwd })) ?? []);
+  const existing = new Set(
+    (await listGithubEnvironments({ repo, cwd: opts.cwd })) ?? [],
+  );
   const missing = kinds.filter((k) => !existing.has(k));
   if (missing.length === 0) {
-    p.log.info(`GitHub environments already exist — skipping (${kinds.join(", ")}).`);
+    p.log.info(
+      `GitHub environments already exist — skipping (${kinds.join(", ")}).`,
+    );
     return;
   }
-  if (!(await confirm({ opts, message: `Create GitHub environment(s) (${missing.join(", ")})?` }))) {
+  if (
+    !(await confirm({
+      opts,
+      message: `Create GitHub environment(s) (${missing.join(", ")})?`,
+    }))
+  ) {
     return;
   }
 
   const s = p.spinner();
   s.start("Creating environments");
   // createGithubEnvironments is idempotent — it re-skips any that now exist.
-  report({ spinner: s, results: await createGithubEnvironments({ config, cwd: opts.cwd }) });
+  report({
+    spinner: s,
+    results: await createGithubEnvironments({ config, cwd: opts.cwd }),
+  });
 }
 
 /**
@@ -356,14 +397,18 @@ async function maybeSaveSecrets({
     return;
   }
 
-  const groups: SecretGroup[] = [...captured.entries()].map(([label, entries]) => ({
-    label,
-    entries,
-  }));
+  const groups: SecretGroup[] = [...captured.entries()].map(
+    ([label, entries]) => ({
+      label,
+      entries,
+    }),
+  );
   const res = saveSecretsFile({ cwd: opts.cwd, groups });
   p.log.success(pc.green(`Wrote ${res.path} ${pc.dim("(chmod 600)")}`));
   if (!res.gitignored) {
-    p.log.warn(`Couldn't update .gitignore automatically — add ${res.path} yourself.`);
+    p.log.warn(
+      `Couldn't update .gitignore automatically — add ${res.path} yourself.`,
+    );
   }
   p.note(
     `Plaintext copies live in ${pc.bold(res.path)}.\nMove them into 1Password / your secret manager, then delete the file.`,
@@ -444,15 +489,22 @@ async function provisionSecrets({
   // secret is idempotent — unlike the token step, prompting again is harmless.
   const existingByLabel = new Map<string, Set<string>>();
   for (const t of targets) {
-    const names = await listGithubSecretNames({ env: t.env, repo, cwd: opts.cwd });
+    const names = await listGithubSecretNames({
+      env: t.env,
+      repo,
+      cwd: opts.cwd,
+    });
     existingByLabel.set(t.label, names ?? new Set());
   }
   const missingCount = targets.reduce(
-    (n, t) => n + names.filter((nm) => !existingByLabel.get(t.label)!.has(nm)).length,
+    (n, t) =>
+      n + names.filter((nm) => !existingByLabel.get(t.label)!.has(nm)).length,
     0,
   );
   if (missingCount === 0) {
-    p.log.info("App secrets already set for the selected environments — skipping.");
+    p.log.info(
+      "App secrets already set for the selected environments — skipping.",
+    );
     return;
   }
 
@@ -471,13 +523,17 @@ async function provisionSecrets({
     // Prefer the real GitHub environment name (which can be anything the user
     // set up); fall back to the label for repo-level targets that have no env.
     const title = target.env ?? target.kind ?? target.label;
-    const scope = target.env ? `environment: ${target.env}` : "repository-level";
+    const scope = target.env
+      ? `environment: ${target.env}`
+      : "repository-level";
     // Flag targets deploykit didn't configure so it's clear they came from the repo.
     const discovered = !target.kind ? pc.dim(" · existing on repo") : "";
     const existing = existingByLabel.get(target.label)!;
     const toSet = names.filter((nm) => !existing.has(nm));
     if (toSet.length === 0) {
-      p.log.info(`${color(pc.bold(title))} ${pc.dim(`(${scope})`)} — all secrets already set, skipping.`);
+      p.log.info(
+        `${color(pc.bold(title))} ${pc.dim(`(${scope})`)} — all secrets already set, skipping.`,
+      );
       continue;
     }
     // A colored, bold section header per environment so that when several
@@ -537,12 +593,17 @@ async function maybeOpenPr({
     p.log.warn("Skipping PR — no files were written.");
     return;
   }
-  if (!(await confirm({ opts, message: "Commit files and open a PR?" }))) return;
+  if (!(await confirm({ opts, message: "Commit files and open a PR?" })))
+    return;
 
   const s = p.spinner();
   s.start("Opening pull request");
   const res = await openPr({ cwd: opts.cwd, paths: written });
-  s.stop(res.ok ? pc.green(`PR opened: ${res.url}`) : pc.red(`PR failed: ${res.detail}`));
+  s.stop(
+    res.ok
+      ? pc.green(`PR opened: ${res.url}`)
+      : pc.red(`PR failed: ${res.detail}`),
+  );
   if (res.restoredTo) {
     p.log.info(
       `Back on ${pc.bold(res.restoredTo)} — the generated files live on the PR branch.`,
@@ -550,7 +611,13 @@ async function maybeOpenPr({
   }
 }
 
-function report({ spinner, results }: { spinner: Spinner; results: StepResult[] }) {
+function report({
+  spinner,
+  results,
+}: {
+  spinner: Spinner;
+  results: StepResult[];
+}) {
   const failed = results.filter((r) => !r.ok);
   if (failed.length === 0) {
     spinner.stop(pc.green(results.map((r) => `✔ ${r.label}`).join("  ")));
@@ -558,19 +625,32 @@ function report({ spinner, results }: { spinner: Spinner; results: StepResult[] 
   }
   spinner.stop(pc.yellow("Some steps had issues:"));
   for (const r of results) {
-    if (r.ok) p.log.success(r.label + (r.detail ? pc.dim(` (${r.detail})`) : ""));
+    if (r.ok)
+      p.log.success(r.label + (r.detail ? pc.dim(` (${r.detail})`) : ""));
     else p.log.error(`${r.label}: ${r.detail ?? "failed"}`);
   }
 }
 
 /** In --yes mode every confirm auto-accepts; otherwise prompt. */
-async function confirm({ opts, message }: { opts: InitOptions; message: string }) {
+async function confirm({
+  opts,
+  message,
+}: {
+  opts: InitOptions;
+  message: string;
+}) {
   if (opts.yes) return true;
   const res = await p.confirm({ message });
   return res === true;
 }
 
-function nextSteps({ config, opts }: { config: DeploykitConfig; opts: InitOptions }) {
+function nextSteps({
+  config,
+  opts,
+}: {
+  config: DeploykitConfig;
+  opts: InitOptions;
+}) {
   const lines = [pc.bold("Next steps:")];
   // Interactive runs already offered provisioning inline; only print the manual
   // fallback when nothing was offered (--yes without --provision).
@@ -581,7 +661,11 @@ function nextSteps({ config, opts }: { config: DeploykitConfig; opts: InitOption
     );
     lines.push(`  • Create Fly apps: ${flyAppNames(config).join(", ")}`);
   } else {
-    lines.push(pc.dim("  • Anything you skipped above can be re-run with `deploykit init`."));
+    lines.push(
+      pc.dim(
+        "  • Anything you skipped above can be re-run with `deploykit init`.",
+      ),
+    );
   }
   // The environment alone doesn't gate anything — the approval prompt only
   // appears once reviewers are configured, which needs a human choice.
@@ -591,6 +675,8 @@ function nextSteps({ config, opts }: { config: DeploykitConfig; opts: InitOption
     );
   }
   if (!opts.pr) lines.push("  • Commit the generated files and open a PR.");
-  lines.push("  • Open a pull request to get your first preview environment 🚀");
+  lines.push(
+    "  • Open a pull request to get your first preview environment 🚀",
+  );
   return lines.join("\n");
 }

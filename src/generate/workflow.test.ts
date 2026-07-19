@@ -1,5 +1,5 @@
-import { parse as parseYaml } from "yaml";
 import { describe, expect, it } from "vitest";
+import { parse as parseYaml } from "yaml";
 import type { DeploykitConfig } from "../config.js";
 import { sampleConfig, sampleWebApp } from "../testing/fixtures.js";
 import { generateWorkflow } from "./workflow.js";
@@ -39,12 +39,16 @@ describe("generateWorkflow", () => {
   });
 
   it("forwards build-time vars as --build-arg instead of runtime secrets", () => {
-    expect(yaml).toContain("SECRET_NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}");
+    expect(yaml).toContain(
+      "SECRET_NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}",
+    );
     expect(yaml).toContain(
       'if [ -n "$SECRET_NEXT_PUBLIC_API_URL" ]; then BUILD_ARGS+=(--build-arg "NEXT_PUBLIC_API_URL=$SECRET_NEXT_PUBLIC_API_URL"); fi',
     );
     // Build vars must NOT be staged as Fly runtime secrets — too late to matter.
-    expect(yaml).not.toContain("flyctl secrets set --stage --app \"$FLY_APP\" NEXT_PUBLIC_API_URL");
+    expect(yaml).not.toContain(
+      'flyctl secrets set --stage --app "$FLY_APP" NEXT_PUBLIC_API_URL',
+    );
     // And the deploy command forwards the collected args.
     expect(yaml).toContain('${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"}');
   });
@@ -65,9 +69,22 @@ describe("generateWorkflow", () => {
   });
 
   it("offers production apps as a choice input (no free-text typos)", () => {
-    const on = (doc as unknown as Record<string, { workflow_dispatch: { inputs: { app: { type: string; options: string[] } } } }>)["on"]!;
+    const on = (
+      doc as unknown as Record<
+        string,
+        {
+          workflow_dispatch: {
+            inputs: { app: { type: string; options: string[] } };
+          };
+        }
+      >
+    ).on!;
     expect(on.workflow_dispatch.inputs.app.type).toBe("choice");
-    expect(on.workflow_dispatch.inputs.app.options).toEqual(["all", "web", "api"]);
+    expect(on.workflow_dispatch.inputs.app.options).toEqual([
+      "all",
+      "web",
+      "api",
+    ]);
   });
 
   it("upserts the preview comment via a per-app marker", () => {
@@ -88,18 +105,24 @@ describe("generateWorkflow", () => {
   });
 
   it("deploys previews/staging single-machine and production with HA", () => {
-    const jobs = yaml.split(/^  (?=\w+:)/m);
-    const jobText = (name: string) => jobs.find((j) => j.startsWith(`${name}:`))!;
+    const jobs = yaml.split(/^ {2}(?=\w+:)/m);
+    const jobText = (name: string) =>
+      jobs.find((j) => j.startsWith(`${name}:`))!;
     expect(jobText("preview")).toContain("--ha=false");
     expect(jobText("staging")).toContain("--ha=false");
     expect(jobText("production")).not.toContain("--ha=false");
   });
 
   it("prefixes every Fly app name the workflow creates or targets", () => {
-    const prefixed = generateWorkflow({ ...sampleConfig, namePrefix: "acme-shop" });
+    const prefixed = generateWorkflow({
+      ...sampleConfig,
+      namePrefix: "acme-shop",
+    });
     expect(prefixed).toContain('FLY_APP="acme-shop-$APP-staging"');
     expect(prefixed).toContain('FLY_APP="acme-shop-$APP-prod"');
-    expect(prefixed).toContain('FLY_APP="acme-shop-$APP-pr-${{ github.event.number }}"');
+    expect(prefixed).toContain(
+      'FLY_APP="acme-shop-$APP-pr-${{ github.event.number }}"',
+    );
     expect(prefixed).toContain(
       'flyctl apps destroy "acme-shop-${{ matrix.app }}-pr-${{ github.event.number }}"',
     );
@@ -119,7 +142,9 @@ describe("generateWorkflow", () => {
       apps: {
         web: {
           ...sampleWebApp,
-          environments: { staging: { name: "web-staging", trigger: "push:main" } },
+          environments: {
+            staging: { name: "web-staging", trigger: "push:main" },
+          },
         },
       },
     };

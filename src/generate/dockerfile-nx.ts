@@ -1,11 +1,11 @@
 import type { AppConfig, DeploykitConfig } from "../config.js";
 import {
-  PM,
   baseStage,
   buildEnvLines,
   fileHeader,
   installLine,
   nodeImage,
+  PM,
   prismaSteps,
   runnerHeader,
   serveModel,
@@ -36,7 +36,7 @@ RUN ${installLine(pm, config)}
 ${buildEnvLines(app)}${prismaSteps(app, pm)}RUN ${pm.run} nx build ${project}${productionFlag}
 `;
 
-  return head + "\n" + runner({ app, config }) + "\n";
+  return `${head}\n${runner({ app, config })}\n`;
 }
 
 function runner({ app, config }: { app: AppConfig; config: DeploykitConfig }) {
@@ -65,7 +65,11 @@ CMD ["node", "server.js"]
     // The install must use npm: the runner is a bare node image (no corepack
     // enable), so pnpm/yarn/bun aren't on PATH — and the pruned package.json
     // has no lockfile or workspace: refs, so npm handles it for every manager.
-    if (integrated && !app.startCommand && (framework === "remix" || framework === "node-server")) {
+    if (
+      integrated &&
+      !app.startCommand &&
+      (framework === "remix" || framework === "node-server")
+    ) {
       return `${header}
 
 COPY --from=build --chown=appuser:nodejs /app/${out} ./

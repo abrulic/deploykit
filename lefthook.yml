@@ -1,0 +1,14 @@
+# Git hooks, managed by lefthook. Installed automatically via the package.json
+# "prepare" script (`lefthook install`) when you run `pnpm install`.
+# Docs: https://lefthook.dev/configuration/
+pre-commit:
+  piped: true # run jobs in order, stop at the first failure
+  jobs:
+    # 1. Format + lint + organize imports on staged files, then re-stage fixes.
+    - name: biome
+      glob: "*.{js,ts,cjs,mjs,jsx,tsx,json,jsonc}"
+      run: pnpm exec biome check --write --no-errors-on-unmatched --files-ignore-unknown=true --colors=off {staged_files}
+      stage_fixed: true
+    # 2. Run the full test suite (fast — vitest run).
+    - name: test
+      run: pnpm test

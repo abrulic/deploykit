@@ -23,12 +23,16 @@ export type LoadConfigResult =
 export function loadConfigFile(cwd: string): LoadConfigResult {
   const text = readText(join(cwd, CONFIG_FILE));
   if (text === null) {
-    return { error: `${CONFIG_FILE} not found — run \`deploykit init\` first.` };
+    return {
+      error: `${CONFIG_FILE} not found — run \`deploykit init\` first.`,
+    };
   }
 
   const m = text.match(/defineConfig\s*\(([\s\S]*)\)/);
   if (!m?.[1]) {
-    return { error: `couldn't find a defineConfig(...) call in ${CONFIG_FILE}.` };
+    return {
+      error: `couldn't find a defineConfig(...) call in ${CONFIG_FILE}.`,
+    };
   }
 
   const cleaned = m[1]

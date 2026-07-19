@@ -51,7 +51,11 @@ export async function preflight(cwd: string) {
   }
 
   if (inGit.code === 0) {
-    const status = await exec({ cmd: "git", args: ["status", "--porcelain"], cwd });
+    const status = await exec({
+      cmd: "git",
+      args: ["status", "--porcelain"],
+      cwd,
+    });
     if (status.stdout.trim().length > 0) {
       warnings.push(
         "Working tree has uncommitted changes. deploykit will add files on top; commit or stash first if you want a clean PR.",
@@ -81,7 +85,14 @@ export async function preflight(cwd: string) {
   // .deploykit/credentials → prompt), so no startup warning here.
   const cfReady = Boolean(process.env.CLOUDFLARE_API_TOKEN?.trim());
 
-  return { ok: errors.length === 0, errors, warnings, ghReady, flyReady, cfReady };
+  return {
+    ok: errors.length === 0,
+    errors,
+    warnings,
+    ghReady,
+    flyReady,
+    cfReady,
+  };
 }
 
 interface CheckAuthInput {
@@ -107,7 +118,9 @@ async function checkAuth({
   }
   const res = await exec({ cmd, args: authArgs, cwd });
   if (res.code !== 0) {
-    warnings.push(`${label} is installed but not authenticated. Needed only for ${needFor}.`);
+    warnings.push(
+      `${label} is installed but not authenticated. Needed only for ${needFor}.`,
+    );
     return { ready: false };
   }
   return { ready: true };

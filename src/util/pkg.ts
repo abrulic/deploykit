@@ -20,7 +20,8 @@ function readOwnPackageJson(): OwnPackageJson {
       const pkg = JSON.parse(
         readFileSync(join(dir, "package.json"), "utf8"),
       ) as Partial<OwnPackageJson>;
-      if (pkg.name && pkg.version) return { name: pkg.name, version: pkg.version };
+      if (pkg.name && pkg.version)
+        return { name: pkg.name, version: pkg.version };
     } catch {
       /* keep walking up */
     }

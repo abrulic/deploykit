@@ -1,4 +1,9 @@
-import type { AppConfig, DeploykitConfig, PackageManager, ServeModel } from "../config.js";
+import type {
+  AppConfig,
+  DeploykitConfig,
+  PackageManager,
+  ServeModel,
+} from "../config.js";
 
 export interface PmCommands {
   /** Run a locally-installed binary: pnpm | npx | yarn | bunx. */
@@ -124,8 +129,7 @@ export const nodeImage = (config: DeploykitConfig) =>
  * ships the binary — no curl needed on the slim image).
  */
 export const baseStage = (config: DeploykitConfig) => {
-  const bun =
-    config.packageManager === "bun" ? "\nRUN npm install -g bun" : "";
+  const bun = config.packageManager === "bun" ? "\nRUN npm install -g bun" : "";
   return `FROM ${nodeImage(config)} AS base
 ENV PNPM_HOME="/pnpm" PATH="/pnpm:$PATH"
 RUN corepack enable || true${bun}`;

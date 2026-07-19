@@ -41,7 +41,11 @@ describe("listGithubSecretNames", () => {
   beforeEach(() => execMock.mockReset());
 
   it("parses the secret names on success", async () => {
-    execMock.mockResolvedValue({ code: 0, stdout: "FLY_API_TOKEN\nDATABASE_URL\n", stderr: "" });
+    execMock.mockResolvedValue({
+      code: 0,
+      stdout: "FLY_API_TOKEN\nDATABASE_URL\n",
+      stderr: "",
+    });
     const names = await listGithubSecretNames({ cwd: "/repo" });
     expect(names).toEqual(new Set(["FLY_API_TOKEN", "DATABASE_URL"]));
   });
@@ -64,7 +68,11 @@ describe("ensureGithubEnvironment", () => {
 
   it("URL-encodes the environment name in the API path", async () => {
     execMock.mockResolvedValue({ code: 0, stdout: "", stderr: "" });
-    await ensureGithubEnvironment({ env: "my env/eu", repo: "acme/shop", cwd: "/repo" });
+    await ensureGithubEnvironment({
+      env: "my env/eu",
+      repo: "acme/shop",
+      cwd: "/repo",
+    });
     const args = execMock.mock.calls[0]![0].args;
     expect(args).toContain("/repos/acme/shop/environments/my%20env%2Feu");
   });

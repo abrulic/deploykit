@@ -156,7 +156,11 @@ describe("findFilesByName", () => {
     const tree = writeTree({ files: { "a.txt": "1" } });
     cleanup = tree.cleanup;
     expect(
-      findFilesByName({ root: tree.root, filename: "project.json", limit: 100 }),
+      findFilesByName({
+        root: tree.root,
+        filename: "project.json",
+        limit: 100,
+      }),
     ).toEqual([]);
   });
 });

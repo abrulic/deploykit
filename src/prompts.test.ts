@@ -1,12 +1,20 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import type { DetectedApp, Detection } from "./detect.js";
-import { writeTree } from "./testing/fixtures.js";
 import {
   buildConfig,
   defaultNamePrefix,
-  sanitizeFlyName,
   type InitOptions,
+  sanitizeFlyName,
 } from "./prompts.js";
+import { writeTree } from "./testing/fixtures.js";
 
 const app: DetectedApp = {
   name: "web",
@@ -66,7 +74,11 @@ describe("buildConfig (non-interactive)", () => {
       opts: { ...baseOpts, org: "acme", region: "sjc" },
     });
     expect(config).not.toBeNull();
-    expect(config?.provider).toEqual({ type: "fly", org: "acme", region: "sjc" });
+    expect(config?.provider).toEqual({
+      type: "fly",
+      org: "acme",
+      region: "sjc",
+    });
     expect(Object.keys(config?.apps ?? {})).toEqual(["web"]);
     // Fly names are globally unique → every name carries the derived prefix.
     expect(config?.namePrefix).toBe("shop-monorepo");
@@ -82,11 +94,16 @@ describe("buildConfig (non-interactive)", () => {
       detection,
       opts: { ...baseOpts, org: "acme", envs: ["staging"] },
     });
-    expect(Object.keys(config?.apps.web?.environments ?? {})).toEqual(["staging"]);
+    expect(Object.keys(config?.apps.web?.environments ?? {})).toEqual([
+      "staging",
+    ]);
   });
 
   it("defaults the region to iad when not provided", async () => {
-    const config = await buildConfig({ detection, opts: { ...baseOpts, org: "acme" } });
+    const config = await buildConfig({
+      detection,
+      opts: { ...baseOpts, org: "acme" },
+    });
     expect(config?.provider.region).toBe("iad");
   });
 
@@ -108,7 +125,12 @@ describe("buildConfig (non-interactive)", () => {
       framework: "react-router",
       serve: "server",
       prisma: [
-        { packageName: "@acme/db", root: "packages/db", schema: "prisma/schema.prisma", hasConfig: true },
+        {
+          packageName: "@acme/db",
+          root: "packages/db",
+          schema: "prisma/schema.prisma",
+          hasConfig: true,
+        },
       ],
     };
     const nxDetection: Detection = {
@@ -118,7 +140,10 @@ describe("buildConfig (non-interactive)", () => {
       installEnv: { LEFTHOOK: "0" },
       apps: [ssrApp],
     };
-    const config = await buildConfig({ detection: nxDetection, opts: { ...baseOpts, org: "acme" } });
+    const config = await buildConfig({
+      detection: nxDetection,
+      opts: { ...baseOpts, org: "acme" },
+    });
     expect(config?.installEnv).toEqual({ LEFTHOOK: "0" });
     expect(config?.nxIntegrated).toBe(false);
     expect(config?.apps.web?.serve).toBe("server");
@@ -126,7 +151,10 @@ describe("buildConfig (non-interactive)", () => {
   });
 
   it("omits runner-shaping fields when they carry no information", async () => {
-    const config = await buildConfig({ detection, opts: { ...baseOpts, org: "acme" } });
+    const config = await buildConfig({
+      detection,
+      opts: { ...baseOpts, org: "acme" },
+    });
     // A plain turbo repo: no install-env, no nxIntegrated, no prisma on the app.
     expect(config?.installEnv).toBeUndefined();
     expect(config?.nxIntegrated).toBeUndefined();
@@ -135,7 +163,10 @@ describe("buildConfig (non-interactive)", () => {
   });
 
   it("persists build-time env vars separately from runtime secrets", async () => {
-    const config = await buildConfig({ detection, opts: { ...baseOpts, org: "acme" } });
+    const config = await buildConfig({
+      detection,
+      opts: { ...baseOpts, org: "acme" },
+    });
     expect(config?.apps.web?.secrets).toEqual(["DATABASE_URL"]);
     expect(config?.apps.web?.buildEnv).toEqual(["NEXT_PUBLIC_API_URL"]);
   });
