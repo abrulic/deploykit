@@ -22,7 +22,7 @@ export async function listFlyOrgs(cwd: string): Promise<FlyOrg[] | null> {
   });
   if (!out) return null;
   try {
-    const map = JSON.parse(out) as Record<string, string>;
+    const map: Record<string, string> = JSON.parse(out);
     const orgs = Object.entries(map).map(([slug, name]) => ({ slug, name }));
     return orgs.length ? orgs : null;
   } catch {

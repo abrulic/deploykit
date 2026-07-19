@@ -63,22 +63,18 @@ export async function preflight(cwd: string) {
     }
   }
 
-  const { ready: ghReady } = await checkAuth({
+  // Auth readiness is detected here but *messaged* by the auth step (src/auth.ts),
+  // which can also drive an interactive login — so preflight stays silent about it
+  // and there's a single place that talks about signing in.
+  const ghReady = await isAuthed({
     cmd: "gh",
     authArgs: ["auth", "status"],
     cwd,
-    label: "`gh` (GitHub CLI)",
-    needFor: "--pr / --provision",
-    warnings,
   });
-
-  const { ready: flyReady } = await checkAuth({
+  const flyReady = await isAuthed({
     cmd: "flyctl",
     authArgs: ["auth", "whoami"],
     cwd,
-    label: "`flyctl`",
-    needFor: "--provision",
-    warnings,
   });
 
   // Cloudflare token is resolved lazily during the domain step (env →
@@ -95,33 +91,17 @@ export async function preflight(cwd: string) {
   };
 }
 
-interface CheckAuthInput {
-  cmd: string;
-  authArgs: string[];
-  cwd: string;
-  label: string;
-  needFor: string;
-  warnings: string[];
-}
-
-async function checkAuth({
+/** True if `cmd` exists and its auth-status check exits 0. */
+async function isAuthed({
   cmd,
   authArgs,
   cwd,
-  label,
-  needFor,
-  warnings,
-}: CheckAuthInput) {
-  if (!(await commandExists(cmd))) {
-    warnings.push(`${label} not found. Needed only for ${needFor}.`);
-    return { ready: false };
-  }
+}: {
+  cmd: string;
+  authArgs: string[];
+  cwd: string;
+}): Promise<boolean> {
+  if (!(await commandExists(cmd))) return false;
   const res = await exec({ cmd, args: authArgs, cwd });
-  if (res.code !== 0) {
-    warnings.push(
-      `${label} is installed but not authenticated. Needed only for ${needFor}.`,
-    );
-    return { ready: false };
-  }
-  return { ready: true };
+  return res.code === 0;
 }

@@ -21,6 +21,8 @@ ${pc.bold("Options")}
       --dry-run       Detect and print the plan, write nothing
       --provision     Force provisioning in --yes mode (Fly apps, FLY_API_TOKEN,
                       GitHub environments). Interactive runs offer it inline.
+      --deploy        Deploy the staging app(s) to Fly at the end of the run.
+                      Interactive runs offer it inline; this skips the prompt.
       --pr            Commit generated files on a branch and open a PR
       --force         Overwrite existing generated files instead of skipping
       --cwd <dir>     Run against a different directory
@@ -44,15 +46,14 @@ function parseEnvs(
     .map((s) => s.trim())
     .filter(Boolean);
   if (parts.length === 0) return { error: "--envs needs a value" };
-  const bad = parts.filter(
-    (x) => !(ENV_KINDS as readonly string[]).includes(x),
-  );
+  const bad = parts.filter((x) => !ENV_KINDS.some((kind) => kind === x));
   if (bad.length) {
     return {
       error: `--envs: unknown environment(s) ${bad.join(", ")} (valid: ${ENV_KINDS.join(", ")})`,
     };
   }
-  return { envs: [...new Set(parts)] as InitOptions["envs"] };
+  // Filter the canonical list to narrow to EnvironmentKind[] (and dedupe).
+  return { envs: ENV_KINDS.filter((kind) => parts.includes(kind)) };
 }
 
 function parseArgs(argv: string[]) {
@@ -60,6 +61,7 @@ function parseArgs(argv: string[]) {
     yes: false,
     dryRun: false,
     provision: false,
+    deploy: false,
     pr: false,
     force: false,
     cwd: process.cwd(),
@@ -88,6 +90,9 @@ function parseArgs(argv: string[]) {
         break;
       case "--provision":
         opts.provision = true;
+        break;
+      case "--deploy":
+        opts.deploy = true;
         break;
       case "--pr":
         opts.pr = true;

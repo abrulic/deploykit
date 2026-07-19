@@ -1,5 +1,5 @@
 import type { DeploykitConfig } from "./config.js";
-import { exec, tryExec } from "./util/exec.js";
+import { type ExecResult, exec, tryExec } from "./util/exec.js";
 
 export interface StepResult {
   label: string;
@@ -60,7 +60,7 @@ export async function listFlyApps(cwd: string): Promise<string[] | null> {
   });
   if (!out) return null;
   try {
-    const apps = JSON.parse(out) as Array<{ Name?: string; name?: string }>;
+    const apps: Array<{ Name?: string; name?: string }> = JSON.parse(out);
     return apps.map((a) => a.Name ?? a.name ?? "").filter(Boolean);
   } catch {
     return null;
@@ -88,29 +88,62 @@ export async function createFlyApps({
     results.push({
       label: `Create Fly app ${name}`,
       ok: res.code === 0 || already,
-      detail: already
-        ? "already exists"
-        : res.code === 0
-          ? undefined
-          : res.stderr.trim(),
+      detail: appCreateDetail({ already, res }),
     });
   }
   return results;
 }
 
+/** Detail line for a Fly app-create: existing apps and clean creates carry none. */
+function appCreateDetail({
+  already,
+  res,
+}: {
+  already: boolean;
+  res: ExecResult;
+}) {
+  if (already) return "already exists";
+  if (res.code === 0) return undefined;
+  return res.stderr.trim();
+}
+
+/** A user-facing DNS record that points a custom hostname at the Fly app. */
+export interface FlyCertRecord {
+  type: "CNAME" | "A" | "AAAA";
+  /** The custom hostname the record is for. */
+  name: string;
+  /** CNAME target or A/AAAA address. */
+  content: string;
+}
+
 export interface FlyCertInfo {
   ok: boolean;
-  /** Hostname for the ACME validation CNAME, e.g. "_acme-challenge.app.example.com". */
-  validationHostname?: string;
-  /** Target the validation CNAME points at, e.g. "app.example.com.xxxx.flydns.net". */
-  validationTarget?: string;
   detail?: string;
+  /** True once Fly has validated and issued the certificate. */
+  configured?: boolean;
+  /** Fly's status string, e.g. "Awaiting configuration" / "Ready". */
+  status?: string;
+  /**
+   * The record(s) that route the hostname to Fly: a CNAME to Fly's target for a
+   * subdomain, or A/AAAA for an apex. Empty when Fly returned no target (e.g.
+   * an app with no allocated IPs) — the caller surfaces that rather than
+   * silently doing nothing.
+   */
+  records?: FlyCertRecord[];
+  /** The DNS-only ACME challenge CNAME Fly uses for DNS-01 validation. */
+  acmeChallenge?: { name: string; target: string };
+  /**
+   * The DNS-only `_fly-ownership` TXT record. Fly asks for this to prove domain
+   * control when it can't see the origin IPs — which is always the case behind
+   * Cloudflare's proxy, so it's essential for a proxied setup.
+   */
+  ownership?: { name: string; value: string };
 }
 
 /**
- * Ensure a Fly cert exists for `hostname` on `app` and return the DNS
- * validation record Fly wants. Idempotent: if the cert already exists we read
- * it back with `certs show` instead of failing.
+ * Ensure a Fly cert exists for `hostname` on `app` and return the DNS records
+ * Fly needs to validate and route it. Idempotent: `flyctl certs add` returns
+ * the existing cert's requirements when one already exists, so re-runs are safe.
  */
 export async function ensureFlyCert({
   hostname,
@@ -121,14 +154,17 @@ export async function ensureFlyCert({
   app: string;
   cwd: string;
 }): Promise<FlyCertInfo> {
-  const create = await exec({
+  // `add` is the current name (`create` is an alias); it returns the cert's
+  // dns_requirements as JSON, and is idempotent for an existing hostname.
+  const add = await exec({
     cmd: "flyctl",
-    args: ["certs", "create", hostname, "-a", app, "--json"],
+    args: ["certs", "add", hostname, "-a", app, "--json"],
     cwd,
   });
-  let raw = create.stdout;
-  if (create.code !== 0) {
-    if (/already|exists/i.test(create.stderr)) {
+  let raw = add.stdout;
+  if (add.code !== 0) {
+    // Fall back to `show` if add reported the cert already exists.
+    if (/already|exists/i.test(add.stderr)) {
       const show = await exec({
         cmd: "flyctl",
         args: ["certs", "show", hostname, "-a", app, "--json"],
@@ -139,42 +175,110 @@ export async function ensureFlyCert({
     } else {
       return {
         ok: false,
-        detail: create.stderr.trim() || "flyctl certs create failed",
+        detail: add.stderr.trim() || "flyctl certs add failed",
       };
     }
   }
-  return { ok: true, ...parseCertValidation(raw) };
+  return { ok: true, ...parseCertRequirements(raw) };
 }
 
-/** Pull the ACME validation hostname/target out of `flyctl certs` JSON (casing varies). */
-function parseCertValidation(
+/** Trailing dots are valid in FQDNs but Cloudflare records don't want them. */
+const stripDot = (s: string) => s.replace(/\.$/, "");
+
+/**
+ * Parse `flyctl certs` JSON into the records to create. Reads the real
+ * `dns_requirements` shape (flyctl ≥ 0.4): `cname` for subdomains, `a`/`aaaa`
+ * for apexes, plus the `acme_challenge` and `ownership` records. Returns empty
+ * pieces (never throws) for anything absent, so a schema drift degrades to a
+ * visible "no target" rather than a crash.
+ */
+export function parseCertRequirements(
   raw: string,
-): Pick<FlyCertInfo, "validationHostname" | "validationTarget"> {
-  let obj: Record<string, unknown>;
+): Omit<FlyCertInfo, "ok" | "detail"> {
+  let obj: {
+    hostname?: string;
+    configured?: boolean;
+    status?: string;
+    dns_requirements?: {
+      cname?: string;
+      a?: unknown[];
+      aaaa?: unknown[];
+      acme_challenge?: { name?: string; target?: string };
+      ownership?: { name?: string; app_value?: string; org_value?: string };
+    };
+  };
   try {
-    obj = JSON.parse(raw) as Record<string, unknown>;
+    obj = JSON.parse(raw);
   } catch {
     return {};
   }
-  const pick = (keys: string[]) => {
-    for (const k of keys) {
-      const v = obj[k];
-      if (typeof v === "string" && v) return v;
-    }
-    return undefined;
-  };
+
+  const host = typeof obj.hostname === "string" ? obj.hostname : undefined;
+  const req = obj.dns_requirements ?? {};
+
+  const records: FlyCertRecord[] = [];
+  const cname = typeof req.cname === "string" ? stripDot(req.cname) : "";
+  if (host && cname) {
+    records.push({ type: "CNAME", name: host, content: cname });
+  } else if (host) {
+    // Apex domains can't CNAME — Fly returns A/AAAA addresses instead.
+    for (const ip of req.a ?? [])
+      if (typeof ip === "string")
+        records.push({ type: "A", name: host, content: ip });
+    for (const ip of req.aaaa ?? [])
+      if (typeof ip === "string")
+        records.push({ type: "AAAA", name: host, content: ip });
+  }
+
+  const ac = req.acme_challenge;
+  const acmeChallenge =
+    ac?.name && ac.target
+      ? { name: stripDot(ac.name), target: stripDot(ac.target) }
+      : undefined;
+
+  const own = req.ownership;
+  const ownership =
+    own?.name && own.app_value
+      ? { name: stripDot(own.name), value: own.app_value }
+      : undefined;
+
   return {
-    validationHostname: pick([
-      "DNSValidationHostname",
-      "DnsValidationHostname",
-      "dnsValidationHostname",
-    ]),
-    validationTarget: pick([
-      "DNSValidationTarget",
-      "DnsValidationTarget",
-      "dnsValidationTarget",
-    ]),
+    configured: obj.configured === true,
+    status: typeof obj.status === "string" ? obj.status : undefined,
+    records,
+    acmeChallenge,
+    ownership,
   };
+}
+
+/**
+ * Read a cert's current issuance state — used to poll after the DNS records are
+ * in place. Returns null when the status can't be read (so a transient flyctl
+ * hiccup during polling isn't mistaken for "issued").
+ */
+export async function checkFlyCert({
+  hostname,
+  app,
+  cwd,
+}: {
+  hostname: string;
+  app: string;
+  cwd: string;
+}): Promise<{ configured: boolean; status?: string } | null> {
+  const res = await exec({
+    cmd: "flyctl",
+    args: ["certs", "show", hostname, "-a", app, "--json"],
+    cwd,
+  });
+  if (res.code !== 0) return null;
+  try {
+    const obj: { configured?: boolean; status?: string } = JSON.parse(
+      res.stdout,
+    );
+    return { configured: obj.configured === true, status: obj.status };
+  } catch {
+    return null;
+  }
 }
 
 /** Resolve the current repo as "owner/name", or null if gh can't determine it. */

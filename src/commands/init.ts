@@ -1,5 +1,7 @@
 import * as p from "@clack/prompts";
+import { ensureAuth } from "../auth.js";
 import type { DeploykitConfig } from "../config.js";
+import { firstDeploy } from "../deploy.js";
 import { detect } from "../detect.js";
 import { planFiles, writeFiles } from "../generate/index.js";
 import {
@@ -25,7 +27,11 @@ import {
   type StepResult,
   setGithubSecret,
 } from "../provision.js";
-import { domainTargets, provisionCloudflare } from "../provision-cloudflare.js";
+import {
+  awaitCertIssuance,
+  domainTargets,
+  provisionCloudflare,
+} from "../provision-cloudflare.js";
 import { type SecretGroup, saveSecretsFile } from "../secrets-file.js";
 import { pc } from "../util/log.js";
 
@@ -74,10 +80,22 @@ export async function runInit(opts: InitOptions) {
   );
   for (const w of detection.warnings) p.log.warn(w);
 
+  // ── Phase 1.5: sign in ──
+  // Bring GitHub/Fly auth up to date before we ask anything — a successful Fly
+  // login unlocks the org picker below. Interactive login is skipped under --yes
+  // / --dry-run (both fall back to a warning pointing at the login command).
+  const interactive = !opts.yes && !opts.dryRun;
+  const { ghReady, flyReady } = await ensureAuth({
+    ghReady: pre.ghReady,
+    flyReady: pre.flyReady,
+    cwd: opts.cwd,
+    interactive,
+  });
+
   // ── Phase 2: ask ──
   // The Cloudflare step resolves its own token (env → .deploykit/credentials →
   // prompt) and exports it, so the provisioning phase below picks it up.
-  const config = await buildConfig({ detection, opts, flyReady: pre.flyReady });
+  const config = await buildConfig({ detection, opts, flyReady });
   if (!config) return 1; // cancelled or missing org
 
   // ── Phase 3: plan ──
@@ -107,17 +125,29 @@ export async function runInit(opts: InitOptions) {
   // Offered inline whenever the CLIs are authenticated. In non-interactive
   // mode (--yes) we keep the old gate and only provision under --provision,
   // since we can't prompt for secret values there.
-  if (!opts.yes || opts.provision) {
-    await runProvisioning({
+  const provisioned = !opts.yes || opts.provision;
+  let captured = new Map<string, { name: string; value: string }[]>();
+  if (provisioned) {
+    captured = await runProvisioning({ config, opts, flyReady, ghReady });
+  }
+
+  // ── Phase 5.5: first deploy ──
+  // Boot the staging app(s) now so init can end on a live URL. Only after
+  // provisioning (which creates the apps + secrets), and only when we can
+  // prompt or the user explicitly opted in with --deploy. Runs before the PR
+  // step, which moves the generated files onto a branch and off the work tree.
+  if (provisioned && (interactive || opts.deploy)) {
+    await firstDeploy({
       config,
-      opts,
-      flyReady: pre.flyReady,
-      ghReady: pre.ghReady,
+      cwd: opts.cwd,
+      flyReady,
+      assumeYes: opts.deploy,
+      captured: captured.get("staging") ?? [],
     });
   }
 
   // ── Phase 6: PR ──
-  if (opts.pr) await maybeOpenPr({ opts, written, ghReady: pre.ghReady });
+  if (opts.pr) await maybeOpenPr({ opts, written, ghReady });
 
   p.outro(nextSteps({ config, opts }));
   return 0;
@@ -162,6 +192,7 @@ async function runProvisioning({
   if (repo) await provisionSecrets({ config, opts, repo, capture });
 
   await maybeSaveSecrets({ opts, captured });
+  return captured;
 }
 
 /**
@@ -213,6 +244,24 @@ async function provisionCloudflareStep({
       ? pc.yellow("Cloudflare — some steps need attention:")
       : pc.green("Cloudflare configured"),
   );
+  reportSteps(results);
+
+  // Records are in place; now wait for Fly to actually issue the certs so we
+  // don't end on "done" while HTTPS is still 526-ing under strict SSL.
+  const c = p.spinner();
+  c.start("Waiting for Fly to issue certificates (a couple of minutes)");
+  const certs = await awaitCertIssuance({ config, cwd: opts.cwd });
+  const anyPending = certs.some((r) => r.detail);
+  c.stop(
+    anyPending
+      ? pc.yellow("Some certificates are still validating")
+      : pc.green("Certificates issued"),
+  );
+  reportSteps(certs);
+}
+
+/** Print a list of provisioning steps: errors red, notes dimmed, clean green. */
+function reportSteps(results: StepResult[]) {
   for (const r of results) {
     if (!r.ok) p.log.error(`${r.label}: ${r.detail ?? "failed"}`);
     else if (r.detail) p.log.warn(`${r.label} ${pc.dim(`(${r.detail})`)}`);
@@ -498,7 +547,7 @@ async function provisionSecrets({
   }
   const missingCount = targets.reduce(
     (n, t) =>
-      n + names.filter((nm) => !existingByLabel.get(t.label)!.has(nm)).length,
+      n + names.filter((nm) => !existingByLabel.get(t.label)?.has(nm)).length,
     0,
   );
   if (missingCount === 0) {
@@ -519,7 +568,7 @@ async function provisionSecrets({
 
   const multiEnv = targets.length > 1;
   for (const [i, target] of targets.entries()) {
-    const color = envPalette[i % envPalette.length]!;
+    const color = envPalette[i % envPalette.length] ?? pc.cyan;
     // Prefer the real GitHub environment name (which can be anything the user
     // set up); fall back to the label for repo-level targets that have no env.
     const title = target.env ?? target.kind ?? target.label;
@@ -528,7 +577,7 @@ async function provisionSecrets({
       : "repository-level";
     // Flag targets deploykit didn't configure so it's clear they came from the repo.
     const discovered = !target.kind ? pc.dim(" · existing on repo") : "";
-    const existing = existingByLabel.get(target.label)!;
+    const existing = existingByLabel.get(target.label) ?? new Set<string>();
     const toSet = names.filter((nm) => !existing.has(nm));
     if (toSet.length === 0) {
       p.log.info(

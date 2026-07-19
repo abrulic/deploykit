@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(gh run *)"
+      "Bash(gh run *)",
+      "Bash(pnpm knip *)"
     ]
   }
 }

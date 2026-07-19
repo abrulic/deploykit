@@ -1,6 +1,10 @@
 import { basename, join } from "node:path";
 import * as p from "@clack/prompts";
-import { listCloudflareZones } from "./cloudflare.js";
+import {
+  cloudflareTokenSetupUrl,
+  listCloudflareZones,
+  verifyToken,
+} from "./cloudflare.js";
 import type {
   AppConfig,
   AppEnvironment,
@@ -25,6 +29,8 @@ export interface InitOptions {
   envs?: EnvironmentKind[];
   dryRun: boolean;
   provision: boolean;
+  /** Deploy the staging app(s) to Fly at the end of the run. */
+  deploy: boolean;
   pr: boolean;
   /** Overwrite files that already exist instead of skipping them. */
   force: boolean;
@@ -133,10 +139,8 @@ function buildFromDefaults({
  * name ("<prefix>-<app>-staging") stays well under Fly's length limit.
  */
 export function sanitizeFlyName(raw: string): string {
-  return raw
-    .toLowerCase()
-    .split("/")
-    .at(-1)!
+  const lastSegment = raw.toLowerCase().split("/").at(-1) ?? "";
+  return lastSegment
     .replace(/[^a-z0-9-]+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "")
@@ -199,9 +203,10 @@ async function pickEnvironments() {
     options: ENV_OPTIONS,
     required: true,
   });
-  // ENV_OPTIONS values are all EnvironmentKind; clack widens to unknown[] here
-  // because there's no initialValues to infer from.
-  return p.isCancel(choice) ? null : (choice as EnvironmentKind[]);
+  if (p.isCancel(choice)) return null;
+  // clack widens the result when there's no initialValues to infer from, so
+  // narrow it back to the known kinds by filtering the canonical list.
+  return ALL_ENVS.filter((kind) => choice.includes(kind));
 }
 
 const MANUAL_ORG = "__manual__";
@@ -348,28 +353,65 @@ async function resolveCloudflareToken(cwd: string): Promise<string | null> {
     return fromFile;
   }
 
-  const pasted = await p.password({
-    message: "Cloudflare API token (blank to skip provisioning now)",
-  });
-  if (p.isCancel(pasted)) return null;
-  const token = pasted.trim();
-  if (!token) return "";
+  // No token yet — point the user at a pre-scoped creation link so they don't
+  // have to guess which permissions to tick.
+  p.note(
+    [
+      "deploykit needs a Cloudflare API token for your zone.",
+      "Open this link (permissions are pre-filled), pick your domain under",
+      `${pc.bold('"Zone Resources"')}, create the token, then paste it below:`,
+      "",
+      pc.cyan(cloudflareTokenSetupUrl()),
+    ].join("\n"),
+    "Cloudflare API token",
+  );
 
-  process.env.CLOUDFLARE_API_TOKEN = token;
-  const save = await p.confirm({
-    message:
-      "Save this token to .deploykit/credentials (gitignored) for next time?",
-    initialValue: true,
-  });
-  if (!p.isCancel(save) && save) {
-    const res = saveCredential(cwd, "CLOUDFLARE_API_TOKEN", token);
-    p.log.success(pc.green(`Saved token → ${res.path}`));
-    if (!res.gitignored)
+  // Up to three tries so a mistyped/expired paste is caught here, not mid-provision.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const pasted = await p.password({
+      message:
+        "Paste your Cloudflare API token (blank to skip provisioning now)",
+    });
+    if (p.isCancel(pasted)) return null;
+    const token = pasted.trim();
+    if (!token) return "";
+
+    const s = p.spinner();
+    s.start("Verifying token with Cloudflare");
+    const check = await verifyToken({ token });
+    s.stop(
+      check.ok
+        ? pc.green("Cloudflare token verified")
+        : pc.yellow("Cloudflare token check failed"),
+    );
+    if (!check.ok) {
       p.log.warn(
-        `Add ${res.path} to .gitignore — couldn't do it automatically.`,
+        `Cloudflare rejected the token (${check.detail ?? "invalid or inactive"}). Check it was copied whole, then try again.`,
       );
+      continue;
+    }
+
+    process.env.CLOUDFLARE_API_TOKEN = token;
+    const save = await p.confirm({
+      message:
+        "Save this token to .deploykit/credentials (gitignored) for next time?",
+      initialValue: true,
+    });
+    if (!p.isCancel(save) && save) {
+      const res = saveCredential(cwd, "CLOUDFLARE_API_TOKEN", token);
+      p.log.success(pc.green(`Saved token → ${res.path}`));
+      if (!res.gitignored)
+        p.log.warn(
+          `Add ${res.path} to .gitignore — couldn't do it automatically.`,
+        );
+    }
+    return token;
   }
-  return token;
+
+  p.log.warn(
+    "Couldn't verify a Cloudflare token after a few tries — skipping the custom-domain step.",
+  );
+  return "";
 }
 
 /**

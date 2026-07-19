@@ -42,6 +42,16 @@ interface CfEnvelope<T> {
   result: T;
 }
 
+/** Shape-check the response wrapper; the generic `result` payload is trusted. */
+function isCfEnvelope<T>(value: unknown): value is CfEnvelope<T> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "success" in value &&
+    typeof value.success === "boolean"
+  );
+}
+
 /** Low-level request. Never throws — network/HTTP errors become `{ ok: false }`. */
 async function request<T>({
   token,
@@ -72,7 +82,8 @@ async function request<T>({
 
   let json: CfEnvelope<T> | undefined;
   try {
-    json = (await res.json()) as CfEnvelope<T>;
+    const parsed: unknown = await res.json();
+    if (isCfEnvelope<T>(parsed)) json = parsed;
   } catch {
     /* non-JSON body */
   }
@@ -84,6 +95,44 @@ async function request<T>({
     return { ok: false, detail, status: res.status };
   }
   return { ok: true, result: json.result, status: res.status };
+}
+
+/**
+ * The permissions deploykit's Cloudflare provisioning needs, as token-template
+ * `permissionGroupKeys`. Zone read + DNS edit are what actually make custom
+ * domains work; the rest cover the zone-settings / WAF / cache hardening steps.
+ */
+const TOKEN_PERMISSIONS = [
+  { key: "zone", type: "read" },
+  { key: "dns", type: "edit" },
+  { key: "ssl_and_certificates", type: "edit" },
+  { key: "zone_settings", type: "edit" },
+  { key: "zone_waf", type: "edit" },
+  { key: "cache_settings", type: "edit" },
+] as const;
+
+/**
+ * A Cloudflare dashboard deep link that opens the "Create API Token" screen
+ * with deploykit's permissions **pre-selected** (the user still picks their
+ * zone under "Zone Resources" and clicks Create). Uses Cloudflare's documented
+ * token-template URL format.
+ */
+export function cloudflareTokenSetupUrl(name = "deploykit"): string {
+  const keys = encodeURIComponent(JSON.stringify(TOKEN_PERMISSIONS));
+  return `https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=${keys}&accountId=*&zoneId=all&name=${encodeURIComponent(name)}`;
+}
+
+/**
+ * Verify a token is valid and active (Cloudflare's `/user/tokens/verify`).
+ * Catches an expired, revoked, or mistyped token up front, before provisioning
+ * fails halfway through with a cryptic per-call error.
+ */
+export function verifyToken({
+  token,
+}: {
+  token: string;
+}): Promise<CfResponse<{ id: string; status: string }>> {
+  return request({ token, method: "GET", path: "/user/tokens/verify" });
 }
 
 /**
