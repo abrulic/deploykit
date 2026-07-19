@@ -15,6 +15,13 @@
   "engines": {
     "node": ">=20"
   },
+  "packageManager": "pnpm@10.28.1",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "lefthook"
+    ]
+  },
   "scripts": {
     "build": "tsup",
     "dev": "tsx src/index.ts",
@@ -27,7 +34,7 @@
     "format": "biome format --write",
     "knip": "knip",
     "prepare": "lefthook install",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "pnpm run build"
   },
   "keywords": [
     "ci",
