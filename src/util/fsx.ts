@@ -87,14 +87,13 @@ export function expandWorkspaceGlobs({
   root: string;
   patterns: string[];
 }) {
-  const positives = patterns
-    .filter((p) => !p.startsWith("!"))
-    .map(globToRegex);
+  const positives = patterns.filter((p) => !p.startsWith("!")).map(globToRegex);
   const negatives = patterns
     .filter((p) => p.startsWith("!"))
     .map((p) => globToRegex(p.slice(1)));
   return packageDirs(root).filter(
-    (d) => positives.some((re) => re.test(d)) && !negatives.some((re) => re.test(d)),
+    (d) =>
+      positives.some((re) => re.test(d)) && !negatives.some((re) => re.test(d)),
   );
 }
 

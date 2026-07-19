@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DeploykitConfig } from "./config.js";
 import { domainTargets, provisionCloudflare } from "./provision-cloudflare.js";
 
@@ -12,7 +12,9 @@ const baseApp = {
   secrets: [],
 };
 
-function configWith(envs: DeploykitConfig["apps"]["web"]["environments"]): DeploykitConfig {
+function configWith(
+  envs: DeploykitConfig["apps"]["web"]["environments"],
+): DeploykitConfig {
   return {
     tool: "nx",
     packageManager: "pnpm",
@@ -34,8 +36,16 @@ function configWith(envs: DeploykitConfig["apps"]["web"]["environments"]): Deplo
 describe("domainTargets", () => {
   it("collects staging/production hostnames and ignores previews + missing ones", () => {
     const config = configWith({
-      preview: { name: "web-pr-{pr}", trigger: "pr", hostname: "ignored.example.com" },
-      staging: { name: "web-staging", trigger: "push:main", hostname: "staging.example.com" },
+      preview: {
+        name: "web-pr-{pr}",
+        trigger: "pr",
+        hostname: "ignored.example.com",
+      },
+      staging: {
+        name: "web-staging",
+        trigger: "push:main",
+        hostname: "staging.example.com",
+      },
       production: { name: "web-prod", trigger: "manual" }, // no hostname → skipped
     });
     expect(domainTargets(config)).toEqual([
@@ -48,9 +58,13 @@ describe("provisionCloudflare", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("returns nothing when there's no cloudflare config", async () => {
-    const config = configWith({ staging: { name: "web-staging", trigger: "push:main" } });
+    const config = configWith({
+      staging: { name: "web-staging", trigger: "push:main" },
+    });
     delete config.cloudflare;
-    expect(await provisionCloudflare({ config, token: "t", cwd: "." })).toEqual([]);
+    expect(await provisionCloudflare({ config, token: "t", cwd: "." })).toEqual(
+      [],
+    );
   });
 
   it("stops with a failed step when the zone can't be verified", async () => {
@@ -63,7 +77,11 @@ describe("provisionCloudflare", () => {
     vi.stubGlobal("fetch", fetchSpy);
 
     const config = configWith({
-      staging: { name: "web-staging", trigger: "push:main", hostname: "staging.example.com" },
+      staging: {
+        name: "web-staging",
+        trigger: "push:main",
+        hostname: "staging.example.com",
+      },
     });
     const results = await provisionCloudflare({ config, token: "t", cwd: "." });
     expect(results).toHaveLength(1);

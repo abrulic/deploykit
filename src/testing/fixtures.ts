@@ -11,7 +11,10 @@ export function writeTree({ files }: { files: Record<string, string> }) {
     mkdirSync(dirname(abs), { recursive: true });
     writeFileSync(abs, contents, "utf8");
   }
-  return { root, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+  return {
+    root,
+    cleanup: () => rmSync(root, { recursive: true, force: true }),
+  };
 }
 
 /** A Next.js app with every environment enabled. */

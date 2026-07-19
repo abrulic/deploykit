@@ -68,9 +68,17 @@ export function renderPlan({ config, files, opts }: RenderPlanInput) {
   lines.push("");
   lines.push(pc.bold("Provisioning"));
   if (willProvision) {
-    lines.push(pc.dim(opts.yes ? "  (auto)" : "  (offered next — confirm each step; existing resources are skipped)"));
+    lines.push(
+      pc.dim(
+        opts.yes
+          ? "  (auto)"
+          : "  (offered next — confirm each step; existing resources are skipped)",
+      ),
+    );
     lines.push(`  Create Fly apps: ${flyApps.join(", ")}`);
-    lines.push(`  Create Fly deploy token → set FLY_API_TOKEN ${pc.dim("(shows under Fly → Tokens)")}`);
+    lines.push(
+      `  Create Fly deploy token → set FLY_API_TOKEN ${pc.dim("(shows under Fly → Tokens)")}`,
+    );
     if (hasEnv({ config, kind: "staging" }))
       lines.push(`  Create GitHub environment: staging`);
     if (hasEnv({ config, kind: "production" }))
@@ -85,10 +93,14 @@ export function renderPlan({ config, files, opts }: RenderPlanInput) {
       const hostCount = Object.values(config.apps)
         .flatMap((a) => [a.environments.staging, a.environments.production])
         .filter((e) => e?.hostname).length;
-      lines.push(`  Cloudflare: ${hostCount} domain(s) — Fly certs, DNS, SSL/security/caching`);
+      lines.push(
+        `  Cloudflare: ${hostCount} domain(s) — Fly certs, DNS, SSL/security/caching`,
+      );
     }
   } else {
-    lines.push(pc.dim("  skipped (pass --provision to create Fly apps + secrets)"));
+    lines.push(
+      pc.dim("  skipped (pass --provision to create Fly apps + secrets)"),
+    );
   }
 
   lines.push("");
@@ -111,7 +123,8 @@ export function flyAppNames(config: DeploykitConfig) {
   const names: string[] = [];
   for (const app of Object.values(config.apps)) {
     if (app.environments.staging) names.push(app.environments.staging.name);
-    if (app.environments.production) names.push(app.environments.production.name);
+    if (app.environments.production)
+      names.push(app.environments.production.name);
   }
   return names;
 }
@@ -164,10 +177,16 @@ export function secretTargets(config: DeploykitConfig): SecretTarget[] {
     }
   }
   const targets: SecretTarget[] = [];
-  if (kinds.has("preview")) targets.push({ kind: "preview", label: "preview (repo)" });
-  if (kinds.has("staging")) targets.push({ kind: "staging", env: "staging", label: "staging" });
+  if (kinds.has("preview"))
+    targets.push({ kind: "preview", label: "preview (repo)" });
+  if (kinds.has("staging"))
+    targets.push({ kind: "staging", env: "staging", label: "staging" });
   if (kinds.has("production"))
-    targets.push({ kind: "production", env: "production", label: "production" });
+    targets.push({
+      kind: "production",
+      env: "production",
+      label: "production",
+    });
   return targets;
 }
 

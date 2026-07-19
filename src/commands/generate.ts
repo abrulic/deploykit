@@ -28,7 +28,10 @@ export async function runGenerate(opts: InitOptions) {
 
   p.note(
     files
-      .map((f) => `  ${f.path}${f.exists ? pc.yellow(" (overwrite)") : pc.green(" (new)")}`)
+      .map(
+        (f) =>
+          `  ${f.path}${f.exists ? pc.yellow(" (overwrite)") : pc.green(" (new)")}`,
+      )
       .join("\n"),
     `Regenerate from ${CONFIG_FILE}`,
   );
@@ -39,7 +42,9 @@ export async function runGenerate(opts: InitOptions) {
   }
 
   if (!opts.yes) {
-    const confirmed = await p.confirm({ message: "Write these files? (existing ones are overwritten)" });
+    const confirmed = await p.confirm({
+      message: "Write these files? (existing ones are overwritten)",
+    });
     if (confirmed !== true) {
       p.cancel("Aborted.");
       return 1;
@@ -48,6 +53,8 @@ export async function runGenerate(opts: InitOptions) {
 
   const { written } = writeFiles({ files, cwd: opts.cwd, force: true });
   for (const f of written) p.log.success(pc.green(`wrote ${f}`));
-  p.outro(`Regenerated ${written.length} file(s) from ${pc.bold(CONFIG_FILE)}.`);
+  p.outro(
+    `Regenerated ${written.length} file(s) from ${pc.bold(CONFIG_FILE)}.`,
+  );
   return 0;
 }

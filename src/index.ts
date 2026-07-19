@@ -36,15 +36,17 @@ ${pc.bold("Examples")}
 const ENV_KINDS = ["preview", "staging", "production"] as const;
 
 /** Parse `--envs preview,staging` into a validated list, or an error string. */
-function parseEnvs(raw: string):
-  | { envs: InitOptions["envs"]; error?: undefined }
-  | { error: string } {
+function parseEnvs(
+  raw: string,
+): { envs: InitOptions["envs"]; error?: undefined } | { error: string } {
   const parts = raw
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
   if (parts.length === 0) return { error: "--envs needs a value" };
-  const bad = parts.filter((x) => !(ENV_KINDS as readonly string[]).includes(x));
+  const bad = parts.filter(
+    (x) => !(ENV_KINDS as readonly string[]).includes(x),
+  );
   if (bad.length) {
     return {
       error: `--envs: unknown environment(s) ${bad.join(", ")} (valid: ${ENV_KINDS.join(", ")})`,
@@ -95,15 +97,30 @@ function parseArgs(argv: string[]) {
         break;
       case "--org":
         opts.org = args[++i];
-        if (!opts.org) return { command, opts, help, version, error: "--org needs a value" };
+        if (!opts.org)
+          return { command, opts, help, version, error: "--org needs a value" };
         break;
       case "--region":
         opts.region = args[++i];
-        if (!opts.region) return { command, opts, help, version, error: "--region needs a value" };
+        if (!opts.region)
+          return {
+            command,
+            opts,
+            help,
+            version,
+            error: "--region needs a value",
+          };
         break;
       case "--envs": {
         const raw = args[++i];
-        if (!raw) return { command, opts, help, version, error: "--envs needs a value" };
+        if (!raw)
+          return {
+            command,
+            opts,
+            help,
+            version,
+            error: "--envs needs a value",
+          };
         const parsed = parseEnvs(raw);
         if (parsed.error !== undefined) {
           return { command, opts, help, version, error: parsed.error };
@@ -113,7 +130,8 @@ function parseArgs(argv: string[]) {
       }
       case "--cwd": {
         const dir = args[++i];
-        if (!dir) return { command, opts, help, version, error: "--cwd needs a value" };
+        if (!dir)
+          return { command, opts, help, version, error: "--cwd needs a value" };
         opts.cwd = resolve(dir);
         break;
       }

@@ -190,7 +190,9 @@ export async function upsertDnsRecord({
       path: `/zones/${zoneId}/dns_records/${current.id}`,
       body,
     });
-    return res.ok ? { ok: true, result: { changed: true } } : { ok: false, detail: res.detail };
+    return res.ok
+      ? { ok: true, result: { changed: true } }
+      : { ok: false, detail: res.detail };
   }
 
   const res = await request({
@@ -199,7 +201,9 @@ export async function upsertDnsRecord({
     path: `/zones/${zoneId}/dns_records`,
     body,
   });
-  return res.ok ? { ok: true, result: { changed: true } } : { ok: false, detail: res.detail };
+  return res.ok
+    ? { ok: true, result: { changed: true } }
+    : { ok: false, detail: res.detail };
 }
 
 /** PATCH a single zone setting, e.g. `ssl` → "strict". */
@@ -238,7 +242,8 @@ interface CfRuleset {
 }
 
 /** Read-only fields the API returns on rules but rejects/ignores on writes. */
-const stripReadOnly = ({ version, last_updated, ...rule }: CfRule): CfRule => rule;
+const stripReadOnly = ({ version, last_updated, ...rule }: CfRule): CfRule =>
+  rule;
 
 /**
  * Append a rule to a phase's entrypoint ruleset, **preserving every rule the
@@ -270,10 +275,14 @@ async function upsertPhaseRule({
     existing = current.result?.rules ?? [];
   } else if (current.status !== 404) {
     // Can't see the current rules — do NOT write, a PUT would replace them all.
-    return { ok: false, detail: `couldn't read existing ${phase} rules: ${current.detail}` };
+    return {
+      ok: false,
+      detail: `couldn't read existing ${phase} rules: ${current.detail}`,
+    };
   }
 
-  if (existing.some(isEquivalent)) return { ok: true, result: { changed: false } };
+  if (existing.some(isEquivalent))
+    return { ok: true, result: { changed: false } };
 
   const res = await request({
     token,
@@ -281,7 +290,9 @@ async function upsertPhaseRule({
     path,
     body: { rules: [...existing.map(stripReadOnly), rule] },
   });
-  return res.ok ? { ok: true, result: { changed: true } } : { ok: false, detail: res.detail };
+  return res.ok
+    ? { ok: true, result: { changed: true } }
+    : { ok: false, detail: res.detail };
 }
 
 /** Cloudflare Managed Ruleset — a well-known, account-independent ID. */
@@ -348,7 +359,8 @@ export async function setStaticAssetCacheRule({
       },
     },
     isEquivalent: (r) =>
-      r.action === "set_cache_settings" && r.expression === STATIC_ASSET_EXPRESSION,
+      r.action === "set_cache_settings" &&
+      r.expression === STATIC_ASSET_EXPRESSION,
   });
 }
 
@@ -364,13 +376,30 @@ export async function applyZoneSettings({
 }): Promise<{ label: string; ok: boolean; detail?: string }[]> {
   const steps: { key: string; label: string; value: unknown }[] = [
     { key: "ssl", label: `SSL = ${cf.ssl}`, value: cf.ssl },
-    { key: "always_use_https", label: "Always Use HTTPS", value: onOff(cf.alwaysUseHttps) },
-    { key: "min_tls_version", label: `Min TLS = ${cf.minTlsVersion}`, value: minTls(cf.minTlsVersion) },
+    {
+      key: "always_use_https",
+      label: "Always Use HTTPS",
+      value: onOff(cf.alwaysUseHttps),
+    },
+    {
+      key: "min_tls_version",
+      label: `Min TLS = ${cf.minTlsVersion}`,
+      value: minTls(cf.minTlsVersion),
+    },
   ];
   const results: { label: string; ok: boolean; detail?: string }[] = [];
   for (const s of steps) {
-    const res = await setZoneSetting({ token, zoneId, key: s.key, value: s.value });
-    results.push({ label: s.label, ok: res.ok, detail: res.ok ? undefined : res.detail });
+    const res = await setZoneSetting({
+      token,
+      zoneId,
+      key: s.key,
+      value: s.value,
+    });
+    results.push({
+      label: s.label,
+      ok: res.ok,
+      detail: res.ok ? undefined : res.detail,
+    });
   }
   return results;
 }

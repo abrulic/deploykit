@@ -26,7 +26,13 @@ const PR_BODY = [
  * to the branch the user started on — success or failure — so the run doesn't
  * leave them stranded on the setup branch.
  */
-export async function openPr({ cwd, paths }: { cwd: string; paths: string[] }): Promise<PrResult> {
+export async function openPr({
+  cwd,
+  paths,
+}: {
+  cwd: string;
+  paths: string[];
+}): Promise<PrResult> {
   if (paths.length === 0) return { ok: false, detail: "nothing to commit" };
 
   // Remember where the user was; "HEAD" means detached (nothing to restore to).
@@ -37,7 +43,8 @@ export async function openPr({ cwd, paths }: { cwd: string; paths: string[] }): 
   });
 
   const restore = async (): Promise<string | undefined> => {
-    if (!original || original === "HEAD" || original === BRANCH) return undefined;
+    if (!original || original === "HEAD" || original === BRANCH)
+      return undefined;
     const res = await exec({ cmd: "git", args: ["checkout", original], cwd });
     return res.code === 0 ? original : undefined;
   };
@@ -48,7 +55,8 @@ export async function openPr({ cwd, paths }: { cwd: string; paths: string[] }): 
   });
 
   const onBranch = await switchToBranch(cwd);
-  if (!onBranch.ok) return { ok: false, detail: onBranch.detail ?? "could not switch branch" };
+  if (!onBranch.ok)
+    return { ok: false, detail: onBranch.detail ?? "could not switch branch" };
 
   const add = await exec({ cmd: "git", args: ["add", ...paths], cwd });
   if (add.code !== 0) return fail(`git add failed: ${add.stderr.trim()}`);
@@ -58,7 +66,8 @@ export async function openPr({ cwd, paths }: { cwd: string; paths: string[] }): 
     args: ["commit", "-m", "ci: add deploykit CI/CD"],
     cwd,
   });
-  if (commit.code !== 0) return fail(`git commit failed: ${commit.stderr.trim()}`);
+  if (commit.code !== 0)
+    return fail(`git commit failed: ${commit.stderr.trim()}`);
 
   const push = await exec({
     cmd: "git",
@@ -69,7 +78,14 @@ export async function openPr({ cwd, paths }: { cwd: string; paths: string[] }): 
 
   const pr = await exec({
     cmd: "gh",
-    args: ["pr", "create", "--title", "ci: add deploykit CI/CD", "--body", PR_BODY],
+    args: [
+      "pr",
+      "create",
+      "--title",
+      "ci: add deploykit CI/CD",
+      "--body",
+      PR_BODY,
+    ],
     cwd,
   });
   if (pr.code !== 0) return fail(`gh pr create failed: ${pr.stderr.trim()}`);
@@ -79,11 +95,18 @@ export async function openPr({ cwd, paths }: { cwd: string; paths: string[] }): 
 
 /** Create the setup branch, or switch to it if it already exists. */
 async function switchToBranch(cwd: string) {
-  const created = await exec({ cmd: "git", args: ["checkout", "-b", BRANCH], cwd });
+  const created = await exec({
+    cmd: "git",
+    args: ["checkout", "-b", BRANCH],
+    cwd,
+  });
   if (created.code === 0) return { ok: true, detail: undefined };
 
   const switched = await exec({ cmd: "git", args: ["checkout", BRANCH], cwd });
   if (switched.code === 0) return { ok: true, detail: undefined };
 
-  return { ok: false, detail: `could not create/switch branch: ${created.stderr.trim()}` };
+  return {
+    ok: false,
+    detail: `could not create/switch branch: ${created.stderr.trim()}`,
+  };
 }

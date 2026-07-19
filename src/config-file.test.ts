@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CONFIG_FILE, loadConfigFile } from "./config-file.js";
 import { generateConfigFile } from "./generate/configfile.js";
-import { sampleConfig } from "./testing/fixtures.js";
-import { writeTree } from "./testing/fixtures.js";
+import { sampleConfig, writeTree } from "./testing/fixtures.js";
 
 describe("loadConfigFile", () => {
   it("round-trips what generateConfigFile emits", () => {
@@ -96,7 +95,9 @@ export default defineConfig({
     try {
       const res = loadConfigFile(tree.root);
       expect(res.error).toBeUndefined();
-      expect(res.config?.apps.web?.watchPaths).toEqual(["https://irrelevant.example/x//y"]);
+      expect(res.config?.apps.web?.watchPaths).toEqual([
+        "https://irrelevant.example/x//y",
+      ]);
     } finally {
       tree.cleanup();
     }

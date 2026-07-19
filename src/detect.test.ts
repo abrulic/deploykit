@@ -5,10 +5,16 @@ import { writeTree } from "./testing/fixtures.js";
 describe("detectFramework", () => {
   it("maps known deps to frameworks", () => {
     expect(detectFramework({ dependencies: { next: "14" } })).toBe("next");
-    expect(detectFramework({ dependencies: { "@remix-run/node": "2" } })).toBe("remix");
+    expect(detectFramework({ dependencies: { "@remix-run/node": "2" } })).toBe(
+      "remix",
+    );
     expect(detectFramework({ dependencies: { astro: "4" } })).toBe("astro");
-    expect(detectFramework({ dependencies: { fastify: "4" } })).toBe("node-server");
-    expect(detectFramework({ dependencies: { express: "4" } })).toBe("node-server");
+    expect(detectFramework({ dependencies: { fastify: "4" } })).toBe(
+      "node-server",
+    );
+    expect(detectFramework({ dependencies: { express: "4" } })).toBe(
+      "node-server",
+    );
     expect(detectFramework({ devDependencies: { vite: "5" } })).toBe("vite");
   });
 
@@ -24,13 +30,19 @@ describe("detectFramework", () => {
   it("treats a plain SPA that only routes with react-router as vite", () => {
     // `react-router` for client routing, but no framework dev plugin.
     expect(
-      detectFramework({ dependencies: { "react-router": "7" }, devDependencies: { vite: "6" } }),
+      detectFramework({
+        dependencies: { "react-router": "7" },
+        devDependencies: { vite: "6" },
+      }),
     ).toBe("vite");
   });
 
   it("prefers next over a bundled vite", () => {
     expect(
-      detectFramework({ dependencies: { next: "14" }, devDependencies: { vite: "5" } }),
+      detectFramework({
+        dependencies: { next: "14" },
+        devDependencies: { vite: "5" },
+      }),
     ).toBe("next");
   });
 
@@ -45,7 +57,10 @@ const MONOREPO = {
   "pnpm-workspace.yaml": "packages:\n  - 'apps/*'\n  - 'packages/*'\n",
   ".nvmrc": "20\n",
   ".env.example": "SENTRY_DSN=\n",
-  "package.json": JSON.stringify({ name: "root", packageManager: "pnpm@9.0.0" }),
+  "package.json": JSON.stringify({
+    name: "root",
+    packageManager: "pnpm@9.0.0",
+  }),
   "apps/web/package.json": JSON.stringify({
     name: "@acme/web",
     scripts: { start: "next start" },
@@ -157,13 +172,18 @@ describe("detect", () => {
     const spa = detect(tree.root).apps.find((a) => a.name === "spa");
     expect(spa?.serve).toBe("static");
     // No runtime process → nothing can be a runtime secret.
-    expect(spa?.buildEnv).toEqual(expect.arrayContaining(["VITE_API_URL", "APP_MODE"]));
+    expect(spa?.buildEnv).toEqual(
+      expect.arrayContaining(["VITE_API_URL", "APP_MODE"]),
+    );
     expect(spa?.secrets).toEqual([]);
   });
 
   it("returns no apps for a bare monorepo", () => {
     const tree = writeTree({
-      files: { "turbo.json": "{}", "package.json": JSON.stringify({ name: "root" }) },
+      files: {
+        "turbo.json": "{}",
+        "package.json": JSON.stringify({ name: "root" }),
+      },
     });
     cleanup = tree.cleanup;
     const result = detect(tree.root);
@@ -184,14 +204,17 @@ describe("detect", () => {
     cleanup = tree.cleanup;
     // MONOREPO's web app has no next.config at all.
     const { warnings } = detect(tree.root);
-    expect(warnings.some((w) => w.includes("standalone") && w.includes("web"))).toBe(true);
+    expect(
+      warnings.some((w) => w.includes("standalone") && w.includes("web")),
+    ).toBe(true);
   });
 
   it("stays quiet when the Next config sets output standalone", () => {
     const tree = writeTree({
       files: {
         ...MONOREPO,
-        "apps/web/next.config.mjs": 'export default { output: "standalone" };\n',
+        "apps/web/next.config.mjs":
+          'export default { output: "standalone" };\n',
       },
     });
     cleanup = tree.cleanup;
@@ -277,7 +300,10 @@ const RR7_MONOREPO = {
   "test-apps/storefront-app/package.json": JSON.stringify({
     name: "storefront-app",
     engines: { node: ">=22.0.0" },
-    scripts: { build: "react-router build", start: "react-router-serve ./build/server/index.js" },
+    scripts: {
+      build: "react-router build",
+      start: "react-router-serve ./build/server/index.js",
+    },
     dependencies: {
       "react-router": "^7.5.0",
       "@react-router/node": "^7.5.0",
@@ -350,7 +376,10 @@ describe("detect — serve model & install env variants", () => {
       files: {
         "turbo.json": "{}",
         "pnpm-workspace.yaml": "packages:\n  - 'apps/*'\n",
-        "package.json": JSON.stringify({ name: "root", packageManager: "pnpm@10" }),
+        "package.json": JSON.stringify({
+          name: "root",
+          packageManager: "pnpm@10",
+        }),
         "apps/spa/package.json": JSON.stringify({
           name: "@acme/spa",
           scripts: { build: "react-router build" },

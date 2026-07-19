@@ -48,7 +48,8 @@ export function saveSecretsFile({
   for (const g of groups) {
     if (g.entries.length === 0) continue;
     lines.push(`# ${g.label}`);
-    for (const { name, value } of g.entries) lines.push(`${name}=${quote(value)}`);
+    for (const { name, value } of g.entries)
+      lines.push(`${name}=${quote(value)}`);
     lines.push("");
   }
 
@@ -61,7 +62,10 @@ export function saveSecretsFile({
     /* non-POSIX — perms are advisory */
   }
 
-  return { path: SECRETS_FILE, gitignored: ensureGitignored(cwd, SECRETS_FILE) };
+  return {
+    path: SECRETS_FILE,
+    gitignored: ensureGitignored(cwd, SECRETS_FILE),
+  };
 }
 
 /**
@@ -86,7 +90,11 @@ export function readCredential(cwd: string, name: string): string | null {
 }
 
 /** Upsert a credential into the gitignored, 0600 credentials file (other lines preserved). */
-export function saveCredential(cwd: string, name: string, value: string): SaveSecretsResult {
+export function saveCredential(
+  cwd: string,
+  name: string,
+  value: string,
+): SaveSecretsResult {
   const abs = join(cwd, CREDENTIALS_FILE);
   mkdirSync(dirname(abs), { recursive: true });
 
@@ -101,20 +109,33 @@ export function saveCredential(cwd: string, name: string, value: string): SaveSe
   const re = new RegExp(`^\\s*${name}\\s*=`);
   const lines = existing ? existing.split("\n") : [];
   let replaced = false;
-  const out = lines.map((l) => (re.test(l) ? ((replaced = true), line) : l));
+  const out = lines.map((l) => {
+    if (!re.test(l)) return l;
+    replaced = true;
+    return line;
+  });
   if (!replaced) {
-    if (out.length === 0) out.push("# deploykit — LOCAL credentials, gitignored. Reused across runs.");
+    if (out.length === 0)
+      out.push(
+        "# deploykit — LOCAL credentials, gitignored. Reused across runs.",
+      );
     out.push(line);
   }
 
-  writeFileSync(abs, `${out.join("\n").replace(/\n*$/, "")}\n`, { encoding: "utf8", mode: 0o600 });
+  writeFileSync(abs, `${out.join("\n").replace(/\n*$/, "")}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
   try {
     chmodSync(abs, 0o600);
   } catch {
     /* non-POSIX — perms are advisory */
   }
 
-  return { path: CREDENTIALS_FILE, gitignored: ensureGitignored(cwd, CREDENTIALS_FILE) };
+  return {
+    path: CREDENTIALS_FILE,
+    gitignored: ensureGitignored(cwd, CREDENTIALS_FILE),
+  };
 }
 
 /** Add `entry` to .gitignore if it isn't already ignored. Returns success. */

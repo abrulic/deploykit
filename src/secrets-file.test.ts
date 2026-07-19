@@ -4,8 +4,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   CREDENTIALS_FILE,
   readCredential,
-  saveCredential,
   SECRETS_FILE,
+  saveCredential,
   saveSecretsFile,
 } from "./secrets-file.js";
 import { writeTree } from "./testing/fixtures.js";
@@ -27,8 +27,14 @@ describe("saveSecretsFile", () => {
     const res = saveSecretsFile({
       cwd: root,
       groups: [
-        { label: "Fly", entries: [{ name: "FLY_API_TOKEN", value: "fo1_abc" }] },
-        { label: "environment: staging", entries: [{ name: "DATABASE_URL", value: "postgres://x" }] },
+        {
+          label: "Fly",
+          entries: [{ name: "FLY_API_TOKEN", value: "fo1_abc" }],
+        },
+        {
+          label: "environment: staging",
+          entries: [{ name: "DATABASE_URL", value: "postgres://x" }],
+        },
       ],
     });
     expect(res.path).toBe(SECRETS_FILE);
@@ -42,7 +48,10 @@ describe("saveSecretsFile", () => {
 
   it("creates the file with owner-only (0600) permissions", () => {
     const root = setup();
-    saveSecretsFile({ cwd: root, groups: [{ label: "Fly", entries: [{ name: "T", value: "v" }] }] });
+    saveSecretsFile({
+      cwd: root,
+      groups: [{ label: "Fly", entries: [{ name: "T", value: "v" }] }],
+    });
     const mode = statSync(join(root, SECRETS_FILE)).mode & 0o777;
     expect(mode).toBe(0o600);
   });
@@ -59,14 +68,22 @@ describe("saveSecretsFile", () => {
 
   it("adds the file to .gitignore, creating it if needed", () => {
     const root = setup();
-    const res = saveSecretsFile({ cwd: root, groups: [{ label: "x", entries: [{ name: "A", value: "v" }] }] });
+    const res = saveSecretsFile({
+      cwd: root,
+      groups: [{ label: "x", entries: [{ name: "A", value: "v" }] }],
+    });
     expect(res.gitignored).toBe(true);
-    expect(readFileSync(join(root, ".gitignore"), "utf8")).toContain(SECRETS_FILE);
+    expect(readFileSync(join(root, ".gitignore"), "utf8")).toContain(
+      SECRETS_FILE,
+    );
   });
 
   it("doesn't duplicate an existing .gitignore entry", () => {
     const root = setup({ ".gitignore": "node_modules\n.deploykit/\n" });
-    saveSecretsFile({ cwd: root, groups: [{ label: "x", entries: [{ name: "A", value: "v" }] }] });
+    saveSecretsFile({
+      cwd: root,
+      groups: [{ label: "x", entries: [{ name: "A", value: "v" }] }],
+    });
     const text = readFileSync(join(root, ".gitignore"), "utf8");
     // Already ignored via the ".deploykit/" dir entry — no new line added.
     expect(text).toBe("node_modules\n.deploykit/\n");
@@ -111,7 +128,9 @@ describe("credentials file", () => {
     const root = setup();
     const res = saveCredential(root, "X", "y");
     expect(res.gitignored).toBe(true);
-    expect(readFileSync(join(root, ".gitignore"), "utf8")).toContain(CREDENTIALS_FILE);
+    expect(readFileSync(join(root, ".gitignore"), "utf8")).toContain(
+      CREDENTIALS_FILE,
+    );
     expect(statSync(join(root, CREDENTIALS_FILE)).mode & 0o777).toBe(0o600);
   });
 
@@ -123,7 +142,7 @@ describe("credentials file", () => {
 
   it("round-trips values with backslashes and escaped quotes", () => {
     const root = setup();
-    for (const value of ['a\\"b', "back\\slash", 'ends with \\', '"quoted"']) {
+    for (const value of ['a\\"b', "back\\slash", "ends with \\", '"quoted"']) {
       saveCredential(root, "X", value);
       expect(readCredential(root, "X")).toBe(value);
     }

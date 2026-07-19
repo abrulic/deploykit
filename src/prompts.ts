@@ -1,5 +1,6 @@
 import { basename, join } from "node:path";
 import * as p from "@clack/prompts";
+import { listCloudflareZones } from "./cloudflare.js";
 import type {
   AppConfig,
   AppEnvironment,
@@ -8,7 +9,6 @@ import type {
   EnvironmentKind,
 } from "./config.js";
 import type { DetectedApp, Detection } from "./detect.js";
-import { listCloudflareZones } from "./cloudflare.js";
 import { listFlyOrgs } from "./fly.js";
 import { readCredential, saveCredential } from "./secrets-file.js";
 import { readJson } from "./util/fsx.js";
@@ -43,7 +43,11 @@ const COMMON_REGIONS = [
 ];
 
 const ENV_OPTIONS: { value: EnvironmentKind; label: string; hint: string }[] = [
-  { value: "preview", label: "PR previews", hint: "one app per pull request, auto torn down" },
+  {
+    value: "preview",
+    label: "PR previews",
+    hint: "one app per pull request, auto torn down",
+  },
   { value: "staging", label: "Staging", hint: "deploys on merge to main" },
   { value: "production", label: "Production", hint: "manual approval gate" },
 ];
@@ -129,17 +133,15 @@ function buildFromDefaults({
  * name ("<prefix>-<app>-staging") stays well under Fly's length limit.
  */
 export function sanitizeFlyName(raw: string): string {
-  return (
-    raw
-      .toLowerCase()
-      .split("/")
-      .at(-1)!
-      .replace(/[^a-z0-9-]+/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 30)
-      .replace(/-$/, "")
-  );
+  return raw
+    .toLowerCase()
+    .split("/")
+    .at(-1)!
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 30)
+    .replace(/-$/, "");
 }
 
 /**
@@ -158,7 +160,7 @@ async function pickNamePrefix(cwd: string): Promise<string | null> {
   const suggestion = defaultNamePrefix(cwd);
   const input = await p.text({
     message: `Fly app name prefix ${pc.dim(
-      "(Fly names are global — a unique prefix avoids \"name taken\"; blank for none)",
+      '(Fly names are global — a unique prefix avoids "name taken"; blank for none)',
     )}`,
     initialValue: suggestion,
     placeholder: suggestion,
@@ -223,7 +225,10 @@ async function pickProvider(opts: InitOptions, flyReady: boolean) {
  * so the user can select instead of remembering slugs; otherwise (or if the
  * user picks "enter manually") we fall back to a free-text slug.
  */
-async function pickOrg(opts: InitOptions, flyReady: boolean): Promise<string | null> {
+async function pickOrg(
+  opts: InitOptions,
+  flyReady: boolean,
+): Promise<string | null> {
   const orgs = flyReady ? await listFlyOrgs(opts.cwd) : null;
   if (!orgs) return typeOrg(opts);
 
@@ -232,11 +237,17 @@ async function pickOrg(opts: InitOptions, flyReady: boolean): Promise<string | n
     options: [
       ...orgs.map((o) => ({
         value: o.slug,
-        label: o.name && o.name !== o.slug ? `${o.slug} ${pc.dim(`— ${o.name}`)}` : o.slug,
+        label:
+          o.name && o.name !== o.slug
+            ? `${o.slug} ${pc.dim(`— ${o.name}`)}`
+            : o.slug,
       })),
       { value: MANUAL_ORG, label: pc.dim("Enter a slug manually…") },
     ],
-    initialValue: opts.org && orgs.some((o) => o.slug === opts.org) ? opts.org : orgs[0]?.slug,
+    initialValue:
+      opts.org && orgs.some((o) => o.slug === opts.org)
+        ? opts.org
+        : orgs[0]?.slug,
   });
   if (p.isCancel(sel)) return null;
   return sel === MANUAL_ORG ? typeOrg(opts) : sel;
@@ -270,7 +281,9 @@ async function pickCloudflare({
   cwd: string;
 }): Promise<{ cloudflare?: CloudflareConfig; hostnames: HostMap } | null> {
   // Only staging/production get custom domains — previews stay on *.fly.dev.
-  const domainKinds = (["staging", "production"] as const).filter((k) => envs.includes(k));
+  const domainKinds = (["staging", "production"] as const).filter((k) =>
+    envs.includes(k),
+  );
   if (domainKinds.length === 0) return { hostnames: {} };
 
   const enable = await p.confirm({
@@ -344,14 +357,17 @@ async function resolveCloudflareToken(cwd: string): Promise<string | null> {
 
   process.env.CLOUDFLARE_API_TOKEN = token;
   const save = await p.confirm({
-    message: "Save this token to .deploykit/credentials (gitignored) for next time?",
+    message:
+      "Save this token to .deploykit/credentials (gitignored) for next time?",
     initialValue: true,
   });
   if (!p.isCancel(save) && save) {
     const res = saveCredential(cwd, "CLOUDFLARE_API_TOKEN", token);
     p.log.success(pc.green(`Saved token → ${res.path}`));
     if (!res.gitignored)
-      p.log.warn(`Add ${res.path} to .gitignore — couldn't do it automatically.`);
+      p.log.warn(
+        `Add ${res.path} to .gitignore — couldn't do it automatically.`,
+      );
   }
   return token;
 }
@@ -394,7 +410,8 @@ function noteSecrets(apps: DetectedApp[]) {
       .map((a) => {
         const parts = [];
         if (a.secrets.length) parts.push(a.secrets.join(", "));
-        if (a.buildEnv.length) parts.push(`${pc.dim("build-time:")} ${a.buildEnv.join(", ")}`);
+        if (a.buildEnv.length)
+          parts.push(`${pc.dim("build-time:")} ${a.buildEnv.join(", ")}`);
         return `${pc.bold(a.name)}: ${parts.join(" · ")}`;
       })
       .join("\n"),
@@ -439,7 +456,8 @@ function assemble({
   if (namePrefix) config.namePrefix = namePrefix;
   if (cloudflare) config.cloudflare = cloudflare;
   if (detection.installEnv) config.installEnv = detection.installEnv;
-  if (detection.nxIntegrated !== undefined) config.nxIntegrated = detection.nxIntegrated;
+  if (detection.nxIntegrated !== undefined)
+    config.nxIntegrated = detection.nxIntegrated;
   return config;
 }
 
@@ -460,9 +478,15 @@ function appConfigFor({
   if (envs.includes("preview"))
     environments.preview = { name: `${base}-pr-{pr}`, trigger: "pr" };
   if (envs.includes("staging"))
-    environments.staging = withHost({ name: `${base}-staging`, trigger: "push:main" }, hosts?.staging);
+    environments.staging = withHost(
+      { name: `${base}-staging`, trigger: "push:main" },
+      hosts?.staging,
+    );
   if (envs.includes("production"))
-    environments.production = withHost({ name: `${base}-prod`, trigger: "manual" }, hosts?.production);
+    environments.production = withHost(
+      { name: `${base}-prod`, trigger: "manual" },
+      hosts?.production,
+    );
 
   const config: AppConfig = {
     root: app.root,

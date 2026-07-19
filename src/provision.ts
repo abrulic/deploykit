@@ -34,10 +34,14 @@ export async function createFlyOrgToken({
     cwd,
   });
   if (res.code !== 0) {
-    return { ok: false, detail: res.stderr.trim() || "flyctl tokens create org failed" };
+    return {
+      ok: false,
+      detail: res.stderr.trim() || "flyctl tokens create org failed",
+    };
   }
   const token = extractFlyToken(res.stdout) ?? extractFlyToken(res.stderr);
-  if (!token) return { ok: false, detail: "couldn't parse token from flyctl output" };
+  if (!token)
+    return { ok: false, detail: "couldn't parse token from flyctl output" };
   return { ok: true, token };
 }
 
@@ -49,7 +53,11 @@ export function extractFlyToken(raw: string): string | null {
 
 /** List Fly app names visible to the current auth, or null if it can't be read. */
 export async function listFlyApps(cwd: string): Promise<string[] | null> {
-  const out = await tryExec({ cmd: "flyctl", args: ["apps", "list", "--json"], cwd });
+  const out = await tryExec({
+    cmd: "flyctl",
+    args: ["apps", "list", "--json"],
+    cwd,
+  });
   if (!out) return null;
   try {
     const apps = JSON.parse(out) as Array<{ Name?: string; name?: string }>;
@@ -129,14 +137,19 @@ export async function ensureFlyCert({
       if (show.code !== 0) return { ok: false, detail: show.stderr.trim() };
       raw = show.stdout;
     } else {
-      return { ok: false, detail: create.stderr.trim() || "flyctl certs create failed" };
+      return {
+        ok: false,
+        detail: create.stderr.trim() || "flyctl certs create failed",
+      };
     }
   }
   return { ok: true, ...parseCertValidation(raw) };
 }
 
 /** Pull the ACME validation hostname/target out of `flyctl certs` JSON (casing varies). */
-function parseCertValidation(raw: string): Pick<FlyCertInfo, "validationHostname" | "validationTarget"> {
+function parseCertValidation(
+  raw: string,
+): Pick<FlyCertInfo, "validationHostname" | "validationTarget"> {
   let obj: Record<string, unknown>;
   try {
     obj = JSON.parse(raw) as Record<string, unknown>;
@@ -151,8 +164,16 @@ function parseCertValidation(raw: string): Pick<FlyCertInfo, "validationHostname
     return undefined;
   };
   return {
-    validationHostname: pick(["DNSValidationHostname", "DnsValidationHostname", "dnsValidationHostname"]),
-    validationTarget: pick(["DNSValidationTarget", "DnsValidationTarget", "dnsValidationTarget"]),
+    validationHostname: pick([
+      "DNSValidationHostname",
+      "DnsValidationHostname",
+      "dnsValidationHostname",
+    ]),
+    validationTarget: pick([
+      "DNSValidationTarget",
+      "DnsValidationTarget",
+      "dnsValidationTarget",
+    ]),
   };
 }
 
@@ -260,7 +281,12 @@ export async function ensureGithubEnvironment({
   const res = await exec({
     cmd: "gh",
     // Environment names may contain spaces/slashes — encode them for the URL.
-    args: ["api", "--method", "PUT", `/repos/${repo}/environments/${encodeURIComponent(env)}`],
+    args: [
+      "api",
+      "--method",
+      "PUT",
+      `/repos/${repo}/environments/${encodeURIComponent(env)}`,
+    ],
     cwd,
   });
   return res.code === 0;
@@ -299,7 +325,11 @@ export async function createGithubEnvironments({
   const results: StepResult[] = [];
   for (const kind of kinds) {
     if (existing.has(kind)) {
-      results.push({ label: `GitHub environment ${kind}`, ok: true, detail: "already exists" });
+      results.push({
+        label: `GitHub environment ${kind}`,
+        ok: true,
+        detail: "already exists",
+      });
       continue;
     }
     const ok = await ensureGithubEnvironment({ env: kind, repo, cwd });

@@ -1,11 +1,11 @@
-import type { DeploykitConfig, AppConfig } from "../config.js";
+import type { AppConfig, DeploykitConfig } from "../config.js";
 import {
-  PM,
   baseStage,
   buildEnvLines,
   fileHeader,
   installLine,
   nodeImage,
+  PM,
   prismaSteps,
   runnerHeader,
   serveModel,
@@ -40,7 +40,7 @@ COPY --from=prune /app/out/full/ .
 ${buildEnvLines(app)}${prismaSteps(app, pm)}RUN ${pm.run} turbo run build --filter=${filter}
 `;
 
-  return head + "\n" + runner({ app, config }) + "\n";
+  return `${head}\n${runner({ app, config })}\n`;
 }
 
 function runner({ app, config }: { app: AppConfig; config: DeploykitConfig }) {

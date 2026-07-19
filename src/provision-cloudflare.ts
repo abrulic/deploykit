@@ -1,4 +1,3 @@
-import type { DeploykitConfig } from "./config.js";
 import {
   applyZoneSettings,
   type CfResponse,
@@ -8,6 +7,7 @@ import {
   setZoneSetting,
   upsertDnsRecord,
 } from "./cloudflare.js";
+import type { DeploykitConfig } from "./config.js";
 import { ensureFlyCert, type StepResult } from "./provision.js";
 
 /** A staging/production hostname and the Fly app that serves it. */
@@ -22,7 +22,8 @@ export function domainTargets(config: DeploykitConfig): DomainTarget[] {
   for (const app of Object.values(config.apps)) {
     for (const kind of ["staging", "production"] as const) {
       const env = app.environments[kind];
-      if (env?.hostname) targets.push({ hostname: env.hostname, flyApp: env.name });
+      if (env?.hostname)
+        targets.push({ hostname: env.hostname, flyApp: env.name });
     }
   }
   return targets;
@@ -49,24 +50,38 @@ export async function provisionCloudflare({
 
   // 1. Verify the zone (this is the "you control the domain" check).
   const zoneRes = await getZone({ token, name: cf.zone });
-  if (!zoneRes.ok) return [{ label: `Verify zone ${cf.zone}`, ok: false, detail: zoneRes.detail }];
+  if (!zoneRes.ok)
+    return [
+      { label: `Verify zone ${cf.zone}`, ok: false, detail: zoneRes.detail },
+    ];
   if (!zoneRes.result) {
     return [
       {
         label: `Verify zone ${cf.zone}`,
         ok: false,
-        detail: "zone not found on this account — check the domain and the token's zone access",
+        detail:
+          "zone not found on this account — check the domain and the token's zone access",
       },
     ];
   }
   const zoneId = zoneRes.result.id;
-  const results: StepResult[] = [{ label: `Verified Cloudflare zone ${cf.zone}`, ok: true }];
+  const results: StepResult[] = [
+    { label: `Verified Cloudflare zone ${cf.zone}`, ok: true },
+  ];
 
   // 2. Per hostname: cert + DNS records.
   for (const target of domainTargets(config)) {
-    const cert = await ensureFlyCert({ hostname: target.hostname, app: target.flyApp, cwd });
+    const cert = await ensureFlyCert({
+      hostname: target.hostname,
+      app: target.flyApp,
+      cwd,
+    });
     if (!cert.ok) {
-      results.push({ label: `Fly cert ${target.hostname}`, ok: false, detail: cert.detail });
+      results.push({
+        label: `Fly cert ${target.hostname}`,
+        ok: false,
+        detail: cert.detail,
+      });
       continue;
     }
     results.push({ label: `Fly cert ${target.hostname}`, ok: true });
@@ -96,26 +111,58 @@ export async function provisionCloudflare({
         content: cert.validationTarget,
         proxied: false,
       });
-      results.push(step(`DNS ${cert.validationHostname} (cert validation, DNS-only)`, acme));
+      results.push(
+        step(
+          `DNS ${cert.validationHostname} (cert validation, DNS-only)`,
+          acme,
+        ),
+      );
     }
   }
 
   // 3. Zone-wide TLS settings.
-  for (const r of await applyZoneSettings({ token, zoneId, cf })) results.push(r);
+  for (const r of await applyZoneSettings({ token, zoneId, cf }))
+    results.push(r);
 
   // 4. Security baseline.
   if (cf.security) {
     results.push(
-      step("Security level = medium", await setZoneSetting({ token, zoneId, key: "security_level", value: "medium" })),
+      step(
+        "Security level = medium",
+        await setZoneSetting({
+          token,
+          zoneId,
+          key: "security_level",
+          value: "medium",
+        }),
+      ),
     );
-    results.push(bestEffort("Managed WAF ruleset", await deployManagedWaf({ token, zoneId })));
+    results.push(
+      bestEffort(
+        "Managed WAF ruleset",
+        await deployManagedWaf({ token, zoneId }),
+      ),
+    );
   }
 
   // 5. Caching.
   if (cf.cache) {
-    results.push(bestEffort("Cache rule: static assets", await setStaticAssetCacheRule({ token, zoneId })));
     results.push(
-      step("Browser cache TTL = 30d", await setZoneSetting({ token, zoneId, key: "browser_cache_ttl", value: 2592000 })),
+      bestEffort(
+        "Cache rule: static assets",
+        await setStaticAssetCacheRule({ token, zoneId }),
+      ),
+    );
+    results.push(
+      step(
+        "Browser cache TTL = 30d",
+        await setZoneSetting({
+          token,
+          zoneId,
+          key: "browser_cache_ttl",
+          value: 2592000,
+        }),
+      ),
     );
   }
 
@@ -130,4 +177,6 @@ const step = (label: string, res: CfResponse<unknown>): StepResult => ({
 
 /** For plan-dependent features: a failure reads as a skip, not a hard error. */
 const bestEffort = (label: string, res: CfResponse<unknown>): StepResult =>
-  res.ok ? { label, ok: true } : { label, ok: true, detail: `skipped: ${res.detail}` };
+  res.ok
+    ? { label, ok: true }
+    : { label, ok: true, detail: `skipped: ${res.detail}` };

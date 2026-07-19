@@ -15,7 +15,11 @@ export interface FlyOrg {
  * fall back to asking for a slug by hand.
  */
 export async function listFlyOrgs(cwd: string): Promise<FlyOrg[] | null> {
-  const out = await tryExec({ cmd: "flyctl", args: ["orgs", "list", "--json"], cwd });
+  const out = await tryExec({
+    cmd: "flyctl",
+    args: ["orgs", "list", "--json"],
+    cwd,
+  });
   if (!out) return null;
   try {
     const map = JSON.parse(out) as Record<string, string>;
