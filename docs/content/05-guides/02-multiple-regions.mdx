@@ -1,0 +1,47 @@
+---
+title: "Multiple regions"
+summary: "Scale stateless apps into extra Fly regions"
+description: "Pass more than one region and the extras become stateless regions the app scales into after each staging/production deploy. For stateless apps only — deploykit does not model database locality."
+---
+
+## Adding regions
+
+Pass more than one region to `init`, or set `regions` under `provider` in the config. The **first** region is the **primary**; the rest are extras:
+
+```bash
+deploykit init --region iad,lhr,fra      # primary iad, plus lhr and fra
+```
+
+```ts
+provider: {
+  type: "fly",
+  org: "my-org",
+  region: "iad",
+  regions: ["iad", "lhr", "fra"],
+}
+```
+
+## What happens
+
+After each **staging/production** deploy, deploykit scales one machine into every extra region:
+
+```bash
+flyctl scale count 1 --region <r>
+```
+
+**Previews stay single-region** — extra regions apply only to staging and production.
+
+## Stateless apps only
+
+> ⚠️ This is for **stateless** apps. deploykit does **not** model database locality: a machine in a far region still talks to whatever single-region `DATABASE_URL` you set, so expect **high write latency** from distant regions.
+
+If your app is stateful, don't add regions without your own strategy — read replicas, `fly-replay`, or region-aware routing. Those are **out of scope** for deploykit; it will happily scale you wide, but it won't make your database fast from three continents.
+
+## Good fits
+
+- Stateless SSR/edge-ish frontends.
+- APIs that are read-mostly against a globally replicated data store you manage yourself.
+
+## Removing a region
+
+Edit `provider.regions` in the config and run `deploykit generate`. Note that scaling *down* existing machines in a dropped region is a Fly operation you run yourself (`flyctl scale count 0 --region <r>`); deploykit only scales up after deploys.

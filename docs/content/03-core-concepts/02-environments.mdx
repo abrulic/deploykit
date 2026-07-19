@@ -1,0 +1,41 @@
+---
+title: "Environments"
+summary: "Preview, staging and production — triggers and guardrails"
+description: "How deploykit models the three deployment environments: PR preview apps with automatic teardown, staging on merge to main, and production behind a manual approval gate."
+---
+
+deploykit configures up to three environments per app. Choose which ones with `--envs` (default: all three).
+
+## Preview
+
+- **Trigger:** a pull request.
+- Every PR gets its **own deployed app**, named with a `{pr}` placeholder (e.g. `acme-web-pr-42`).
+- The preview URL is **commented on the PR**.
+- When the PR **closes**, the preview app is **torn down** automatically.
+- Previews stay **single-region** even if you configure extra regions.
+
+Previews give reviewers a live, isolated environment for every change without manual setup or leftover apps.
+
+## Staging
+
+- **Trigger:** push to `main` (i.e. merge).
+- A single, concrete app (e.g. `acme-web-staging`).
+- Deploys automatically once a PR lands, so `main` always has a running staging environment.
+
+## Production
+
+- **Trigger:** manual.
+- Sits behind a **GitHub Environment protection rule** — a required reviewer must approve the deploy.
+- Same generated artifacts as staging; the difference is the approval gate and the app name/secrets.
+
+## How triggers map
+
+| Environment | Trigger | Fly app name | Teardown |
+|-------------|---------|--------------|----------|
+| preview | `pr` | `…-pr-{pr}` | on PR close |
+| staging | `push:main` | `…-staging` | — |
+| production | `manual` | `…-prod` | — |
+
+## Secrets per environment
+
+Each environment resolves its own secret **values** from GitHub secrets at deploy time — deploykit only records the **names** the app needs. Runtime secrets are applied with `flyctl secrets set`; build-time variables (client-exposed prefixes like `NEXT_PUBLIC_`/`VITE_`, and every variable of a static app) are passed as `--build-arg` during `docker build`. See **[Provisioning & secrets](/guides/provisioning-and-secrets)**.

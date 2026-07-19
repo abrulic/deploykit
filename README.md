@@ -131,6 +131,19 @@ You can verify all of this: the code is source-available (see
 [`src/auth.ts`](src/auth.ts)), and releases ship with npm provenance. Full
 details and revocation steps are in [SECURITY.md](SECURITY.md).
 
+## Documentation
+
+Full documentation lives in [`docs/`](docs/) — a self-contained docs site
+(React Router v7 + content-collections, built from the
+[code-forge docs template](https://github.com/code-forge-io/docs)). The content
+is under [`docs/content/`](docs/content/). To run it locally:
+
+```bash
+cd docs
+pnpm install
+pnpm run dev
+```
+
 ## License
 
 deploykit is **source-available** under the [Business Source License 1.1](LICENSE) (`BUSL-1.1`).

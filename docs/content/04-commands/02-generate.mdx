@@ -1,0 +1,39 @@
+---
+title: "deploykit generate"
+summary: "Regenerate artifacts from deploykit.config.ts"
+description: "Reference for deploykit generate — rebuilds every Dockerfile, fly.toml and the workflow from the existing deploykit.config.ts, overwriting them."
+---
+
+## Synopsis
+
+```bash
+deploykit generate [options]
+```
+
+Regenerates the Dockerfiles, `fly.toml` files and the workflow **from `deploykit.config.ts`**, overwriting them. Use this after you edit the config — it's the counterpart to `init`, without the detect/ask/provision steps.
+
+## When to use it
+
+- You edited `deploykit.config.ts` (added an app, changed a port, set `healthCheckPath`, added regions, etc.) and want the generated files to match.
+- You upgraded deploykit and want to pick up improvements to the generated output.
+- You want deterministic, reviewable regeneration in CI.
+
+Because every artifact is a pure function of the config, `generate` is safe to run repeatedly — the output only changes when the config does.
+
+## Options
+
+`generate` shares the relevant flags with `init`:
+
+| Flag | Description |
+|------|-------------|
+| `--force` | Overwrite existing generated files (generate overwrites by design). |
+| `--cwd <dir>` | Run against a different directory. |
+
+## Example
+
+```bash
+# Edit deploykit.config.ts, then:
+deploykit generate
+```
+
+> **Heads up:** `generate` overwrites the generated files. If you hand-edited a Dockerfile or `fly.toml`, move that change into `deploykit.config.ts` first, or it will be lost.

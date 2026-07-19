@@ -1,0 +1,57 @@
+---
+title: "deploykit init"
+summary: "Detect the monorepo and set everything up"
+description: "Reference for deploykit init — the five-phase command that detects your monorepo, asks a few pre-filled questions, shows a plan, and emits Dockerfiles, fly.toml files, a workflow and the config file."
+---
+
+## Synopsis
+
+```bash
+deploykit init [options]
+```
+
+Detects the monorepo and sets everything up. Runs five phases — **preflight → detect → ask → plan → emit** — and writes or provisions nothing until you confirm the plan.
+
+## What it produces
+
+- `apps/<app>/Dockerfile` and `.dockerignore`
+- `apps/<app>/fly.toml`
+- `.github/workflows/deploy.yml`
+- `deploykit.config.ts`
+
+Optionally (when you opt in): provisioned Fly apps, the `FLY_API_TOKEN` GitHub secret, GitHub environments, a deploy of staging, and an opened PR.
+
+## Options
+
+| Flag | Description |
+|------|-------------|
+| `-y`, `--yes` | Accept detected defaults, no prompts. |
+| `--org <slug>` | Fly organization slug. |
+| `--region <list>` | Fly region(s), comma-separated; first is primary, the rest are extra **stateless** regions (default: `iad`). |
+| `--envs <list>` | Environments to configure: `preview,staging,production` (default: all). |
+| `--dry-run` | Detect and print the plan, write nothing. |
+| `--provision` | Force provisioning in `--yes` mode (Fly apps, `FLY_API_TOKEN`, GitHub environments). Interactive runs offer it inline. |
+| `--deploy` | Deploy the staging app(s) to Fly at the end of the run. |
+| `--pr` | Commit generated files on a branch and open a PR. |
+| `--force` | Overwrite existing generated files instead of skipping. |
+| `--cwd <dir>` | Run against a different directory. |
+
+## Examples
+
+```bash
+# Fully interactive
+deploykit init
+
+# Non-interactive dry run
+deploykit init --yes --org my-org --region iad --dry-run
+
+# Only preview + staging
+deploykit init --yes --org my-org --envs preview,staging
+
+# Multi-region primary + extras
+deploykit init --region iad,lhr,fra
+```
+
+## Re-running
+
+`init` skips files that already exist unless you pass `--force`. To rebuild artifacts from an edited config without re-detecting, use **[`deploykit generate`](/commands/generate)** instead.

@@ -1,0 +1,52 @@
+---
+title: "CLI reference"
+summary: "Every command and flag"
+description: "Complete reference for the deploykit CLI — the init, generate and rollback commands and all their options, with examples."
+---
+
+## Commands
+
+```bash
+deploykit init [options]      Detect the monorepo and set everything up
+deploykit generate [options]  Regenerate Dockerfiles/workflow/fly.toml from
+                              deploykit.config.ts (overwrites them)
+deploykit rollback [options]  Redeploy a prior image for one environment's Fly
+                              app (app only — does not undo DB migrations)
+```
+
+## Global options
+
+| Flag | Description |
+|------|-------------|
+| `-h`, `--help` | Show help. |
+| `-v`, `--version` | Show version. |
+| `--cwd <dir>` | Run against a different directory. |
+
+## Options
+
+| Flag | Applies to | Description |
+|------|------------|-------------|
+| `-y`, `--yes` | init, rollback | Accept detected defaults / skip prompts. |
+| `--org <slug>` | init | Fly organization slug. |
+| `--region <list>` | init | Fly region(s), comma-separated; first is primary, the rest are extra stateless regions (default: `iad`). |
+| `--envs <list>` | init | Environments to configure: `preview,staging,production` (default: all). |
+| `--dry-run` | init | Detect and print the plan, write nothing. |
+| `--provision` | init | Force provisioning in `--yes` mode (Fly apps, `FLY_API_TOKEN`, GitHub environments). |
+| `--deploy` | init | Deploy the staging app(s) to Fly at the end of the run. |
+| `--pr` | init | Commit generated files on a branch and open a PR. |
+| `--force` | init, generate | Overwrite existing generated files instead of skipping. |
+| `--app <name>` | rollback | App to roll back (defaults to the sole app). |
+| `--env <kind>` | rollback | Environment: `staging` or `production`. |
+| `--to <version>` | rollback | Release version to redeploy (non-interactive). |
+
+## Examples
+
+```bash
+deploykit init
+deploykit init --yes --org my-org --region iad --dry-run
+deploykit init --yes --org my-org --envs preview,staging
+deploykit init --region iad,lhr,fra
+deploykit generate
+deploykit rollback --app web --env production
+deploykit rollback --app web --env production --to 41 --yes
+```

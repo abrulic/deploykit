@@ -1,0 +1,47 @@
+---
+title: "deploykit rollback"
+summary: "Redeploy a prior image for one environment"
+description: "Reference for deploykit rollback — lists an environment's past Fly releases, shows the exact flyctl deploy command, and redeploys the image you pick. Rolls back the app image only, not database migrations."
+---
+
+## Synopsis
+
+```bash
+deploykit rollback [options]
+```
+
+When a release deployed cleanly but turned out bad, `rollback` redeploys a **previous image** for one environment's Fly app. It lists the environment's Fly releases, lets you pick one, shows the exact `flyctl deploy --image …` it will run, and asks before doing it.
+
+## How it works
+
+1. Reads `deploykit.config.ts` to resolve the target app + environment's Fly app name.
+2. Runs `flyctl releases --json` and normalizes the list (defensively across flyctl versions).
+3. Lets you pick a prior release (or takes `--to <version>`).
+4. Prints the exact `flyctl deploy --image <ref>` command.
+5. Asks for confirmation, then runs it.
+
+Only **staging** and **production** can be rolled back — they have concrete Fly app names. Preview apps use a per-PR placeholder name and aren't rollback targets.
+
+## Options
+
+| Flag | Description |
+|------|-------------|
+| `--app <name>` | App to roll back (defaults to the sole app if there's only one). |
+| `--env <kind>` | Environment: `staging` or `production`. |
+| `--to <version>` | Release version to redeploy (non-interactive). |
+| `-y`, `--yes` | Skip the confirmation prompt (use with `--to`). |
+| `--cwd <dir>` | Run against a different directory. |
+
+## Examples
+
+```bash
+# Interactive: pick a release for production
+deploykit rollback --app web --env production
+
+# Scripted: redeploy version 41 without prompts
+deploykit rollback --app web --env production --to 41 --yes
+```
+
+## Important: image only
+
+Rollback redeploys the **app image only** — it does **not** undo database migrations. An older image may not run correctly against a schema a newer release already migrated. If a bad release included a migration, plan the data path separately. See **[Database migrations](/guides/database-migrations)**.

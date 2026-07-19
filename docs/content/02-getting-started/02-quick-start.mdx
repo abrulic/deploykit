@@ -1,0 +1,77 @@
+---
+title: "Quick Start"
+summary: "Run deploykit init and understand its five phases"
+description: "Walk through deploykit init end to end — the preflight, detect, ask, plan and emit phases — plus the non-interactive form for scripting and CI."
+---
+
+## One command
+
+From the root of your monorepo:
+
+```bash
+npx deploykit init
+```
+
+`init` runs five phases, and **nothing is written or provisioned until you confirm the plan**.
+
+### 1. Preflight
+
+Verifies you're in a git repo with a Turbo or Nx monorepo, and that `gh` / `flyctl` are available if you'll need them.
+
+### 2. Detect
+
+Reads your package manager, workspace packages, each app's framework, its port, its internal workspace dependencies, any Prisma schemas, and the environment-variable names it references.
+
+### 3. Ask
+
+A handful of questions, **each pre-filled from detection**: which apps to deploy, which environments to configure, your Fly org and region(s), and (optionally) custom domains.
+
+### 4. Plan
+
+Shows exactly what will be written and provisioned. This is your review gate.
+
+### 5. Emit
+
+Writes the files and — only if you opt in — provisions Fly apps, sets GitHub secrets/environments, and opens a PR.
+
+## Non-interactive
+
+For CI or scripting, accept the detected defaults with `--yes`:
+
+```bash
+# Print the plan and stop — writes nothing
+deploykit init --yes --org my-org --region iad --dry-run
+
+# Write the files
+deploykit init --yes --org my-org --region iad
+
+# Also provision Fly apps + the FLY_API_TOKEN secret, and open a PR
+deploykit init --yes --org my-org --region iad --provision --pr
+```
+
+Common flags:
+
+| Flag | Description |
+|------|-------------|
+| `--yes`, `-y` | Accept detected defaults, no prompts. |
+| `--org <slug>` | Fly organization slug. |
+| `--region <list>` | Fly region(s), comma-separated. First is primary; the rest are extra stateless regions. |
+| `--envs <list>` | Which environments to configure (`preview,staging,production`). |
+| `--dry-run` | Detect and print the plan, but write nothing. |
+| `--provision` | Create Fly apps and set the `FLY_API_TOKEN` GitHub secret. |
+| `--deploy` | Deploy the staging app(s) at the end of the run. |
+| `--pr` | Commit generated files on a branch and open a PR. |
+| `--force` | Overwrite existing generated files instead of skipping. |
+| `--cwd <dir>` | Run against a different directory. |
+
+See the **[CLI Reference](/reference/cli-flags)** for the full list.
+
+## After init
+
+Once the PR is open (or the files are committed), your pipeline is live:
+
+- Open a PR → a preview app is deployed and its URL is commented on the PR.
+- Merge to `main` → staging deploys.
+- Approve the production gate → production deploys.
+
+Next, see **[What it generates](/getting-started/what-it-generates)** to understand each file.
