@@ -1,7 +1,7 @@
 import * as p from "@clack/prompts";
 import { ensureAuth } from "../auth.js";
-import type { DeploykitConfig } from "../config.js";
-import { firstDeploy } from "../deploy.js";
+import type { DeploykitConfig, EnvironmentKind, Trigger } from "../config.js";
+import { firstDeploy, flyUrl } from "../deploy.js";
 import { detect } from "../detect.js";
 import { planFiles, writeFiles } from "../generate/index.js";
 import {
@@ -34,6 +34,7 @@ import {
 } from "../provision-cloudflare.js";
 import { type SecretGroup, saveSecretsFile } from "../secrets-file.js";
 import { pc } from "../util/log.js";
+import { createPhases, plannedPhases } from "../util/phase.js";
 
 /** Accumulates plaintext secret values set during a run for optional local export. */
 type SecretCapture = (label: string, name: string, value: string) => void;
@@ -57,8 +58,10 @@ type Spinner = ReturnType<typeof p.spinner>;
 
 export async function runInit(opts: InitOptions) {
   p.intro(pc.bgCyan(pc.black(" deploykit ")));
+  const phases = createPhases(plannedPhases(opts).length);
 
-  // ── Phase 0: preflight ──
+  // ── Preflight ──
+  phases.begin("Preflight");
   const pre = await preflight(opts.cwd);
   for (const w of pre.warnings) p.log.warn(w);
   if (!pre.ok) {
@@ -67,7 +70,8 @@ export async function runInit(opts: InitOptions) {
     return 1;
   }
 
-  // ── Phase 1: detect ──
+  // ── Detect ──
+  phases.begin("Detect");
   const detection = detect(opts.cwd);
   const deployable = detection.apps.filter((a) => a.deployable);
   if (deployable.length === 0) {
@@ -75,16 +79,17 @@ export async function runInit(opts: InitOptions) {
     p.outro(pc.red("Nothing to do."));
     return 1;
   }
-  p.log.step(
-    `Detected ${pc.bold(detection.tool)} · ${detection.packageManager} · Node ${detection.nodeVersion} · ${deployable.length} app(s)`,
+  p.log.message(
+    `${pc.bold(detection.tool)} · ${detection.packageManager} · Node ${detection.nodeVersion} · ${deployable.length} app(s)`,
   );
   for (const w of detection.warnings) p.log.warn(w);
 
-  // ── Phase 1.5: sign in ──
+  // ── Sign in ──
   // Bring GitHub/Fly auth up to date before we ask anything — a successful Fly
   // login unlocks the org picker below. Interactive login is skipped under --yes
   // / --dry-run (both fall back to a warning pointing at the login command).
   const interactive = !opts.yes && !opts.dryRun;
+  if (interactive) phases.begin("Sign in");
   const { ghReady, flyReady } = await ensureAuth({
     ghReady: pre.ghReady,
     flyReady: pre.flyReady,
@@ -92,13 +97,15 @@ export async function runInit(opts: InitOptions) {
     interactive,
   });
 
-  // ── Phase 2: ask ──
+  // ── Configure ──
   // The Cloudflare step resolves its own token (env → .deploykit/credentials →
   // prompt) and exports it, so the provisioning phase below picks it up.
+  phases.begin("Configure");
   const config = await buildConfig({ detection, opts, flyReady });
   if (!config) return 1; // cancelled or missing org
 
-  // ── Phase 3: plan ──
+  // ── Plan ──
+  phases.begin("Plan");
   const files = planFiles({ config, cwd: opts.cwd });
   p.note(renderPlan({ config, files, opts }), "Plan");
 
@@ -112,7 +119,8 @@ export async function runInit(opts: InitOptions) {
     return 1;
   }
 
-  // ── Phase 4: emit ──
+  // ── Generate ──
+  phases.begin("Generate");
   const { written, skipped } = writeFiles({
     files,
     cwd: opts.cwd,
@@ -121,22 +129,24 @@ export async function runInit(opts: InitOptions) {
   for (const f of written) p.log.success(pc.green(`wrote ${f}`));
   for (const f of skipped) p.log.warn(`skipped existing ${f}`);
 
-  // ── Phase 5: provision ──
+  // ── Provision ──
   // Offered inline whenever the CLIs are authenticated. In non-interactive
   // mode (--yes) we keep the old gate and only provision under --provision,
   // since we can't prompt for secret values there.
   const provisioned = !opts.yes || opts.provision;
   let captured = new Map<string, { name: string; value: string }[]>();
   if (provisioned) {
+    phases.begin("Provision");
     captured = await runProvisioning({ config, opts, flyReady, ghReady });
   }
 
-  // ── Phase 5.5: first deploy ──
+  // ── Deploy ──
   // Boot the staging app(s) now so init can end on a live URL. Only after
   // provisioning (which creates the apps + secrets), and only when we can
   // prompt or the user explicitly opted in with --deploy. Runs before the PR
   // step, which moves the generated files onto a branch and off the work tree.
   if (provisioned && (interactive || opts.deploy)) {
+    phases.begin("Deploy");
     await firstDeploy({
       config,
       cwd: opts.cwd,
@@ -146,9 +156,13 @@ export async function runInit(opts: InitOptions) {
     });
   }
 
-  // ── Phase 6: PR ──
-  if (opts.pr) await maybeOpenPr({ opts, written, ghReady });
+  // ── Open PR ──
+  if (opts.pr) {
+    phases.begin("Open PR");
+    await maybeOpenPr({ opts, written, ghReady });
+  }
 
+  p.note(renderDestinations(config), "Destinations");
   p.outro(nextSteps({ config, opts }));
   return 0;
 }
@@ -691,6 +705,72 @@ async function confirm({
   if (opts.yes) return true;
   const res = await p.confirm({ message });
   return res === true;
+}
+
+/**
+ * A per-app map of where each environment lives — its final public URL (the
+ * custom domain when Cloudflare is wired, else the `*.fly.dev` address), the
+ * Fly app behind it, and when it deploys. Printed at the end so the run closes
+ * on "here's your destination", not a generic checklist.
+ */
+export function renderDestinations(config: DeploykitConfig): string {
+  const order: EnvironmentKind[] = ["preview", "staging", "production"];
+  const triggerLabel: Record<Trigger, string> = {
+    pr: "on every pull request",
+    "push:main": "on merge to main",
+    manual: "manual approval",
+  };
+
+  interface Row {
+    env: string;
+    url: string;
+    fly: string;
+    meta: string;
+  }
+  const blocks: { app: string; rows: Row[] }[] = [];
+  for (const [app, cfg] of Object.entries(config.apps)) {
+    const rows: Row[] = [];
+    for (const kind of order) {
+      const env = cfg.environments[kind];
+      if (!env) continue;
+      rows.push({
+        env: kind,
+        url: env.hostname ? `https://${env.hostname}` : flyUrl(env.name),
+        fly: env.name,
+        meta: triggerLabel[env.trigger],
+      });
+    }
+    if (rows.length) blocks.push({ app, rows });
+  }
+  if (blocks.length === 0) return pc.dim("No environments configured.");
+
+  const allRows = blocks.flatMap((b) => b.rows);
+  const envW = Math.max(...allRows.map((r) => r.env.length));
+  const urlW = Math.max(...allRows.map((r) => r.url.length));
+
+  const lines: string[] = [];
+  blocks.forEach((b, i) => {
+    if (i) lines.push("");
+    lines.push(pc.bold(b.app));
+    for (const r of b.rows) {
+      // Pad the raw text, then colour — colouring first would let ANSI codes
+      // inflate the measured width and break column alignment.
+      lines.push(
+        `  ${r.env.padEnd(envW)}  ${pc.cyan(r.url.padEnd(urlW))}  ${pc.dim(`${r.meta} · fly: ${r.fly}`)}`,
+      );
+    }
+  });
+
+  const cf = config.cloudflare;
+  if (cf) {
+    lines.push("");
+    lines.push(
+      pc.dim(
+        `Cloudflare zone ${cf.zone} · DNS proxied · SSL ${cf.ssl} · HTTPS enforced`,
+      ),
+    );
+  }
+  return lines.join("\n");
 }
 
 function nextSteps({
