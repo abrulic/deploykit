@@ -151,4 +151,37 @@ describe("generateWorkflow", () => {
     const parsed: ParsedWorkflow = parseYaml(generateWorkflow(stagingOnly));
     expect(Object.keys(parsed.jobs).sort()).toEqual(["changes", "staging"]);
   });
+
+  it("emits no scale step and is byte-identical when no extra regions are set", () => {
+    // A redundant regions list (only the primary) must not change a thing.
+    const onlyPrimary: DeploykitConfig = {
+      ...sampleConfig,
+      provider: { ...sampleConfig.provider, regions: ["iad"] },
+    };
+    expect(yaml).not.toContain("flyctl scale count");
+    expect(generateWorkflow(onlyPrimary)).toBe(yaml);
+  });
+
+  it("scales into extra regions for staging/production but not preview", () => {
+    const multi: DeploykitConfig = {
+      ...sampleConfig,
+      provider: { ...sampleConfig.provider, regions: ["iad", "lhr", "fra"] },
+    };
+    const out = generateWorkflow(multi);
+    // Still valid YAML with the scale loop present.
+    expect(() => parseYaml(out)).not.toThrow();
+    expect(out).toContain("for R in lhr fra; do");
+    // Best-effort: guarded with `|| echo ::warning::` so a transient scale
+    // failure under `set -e` never fails an already-successful deploy.
+    expect(out).toContain(
+      'flyctl scale count 1 --region "$R" --app "$FLY_APP" --yes || echo "::warning::could not scale $FLY_APP into $R"',
+    );
+    // Preview blocks stay single-region: the scale loop appears once per
+    // non-preview env (staging + production), never inside the preview job.
+    const previewJob = out.slice(
+      out.indexOf("  preview:"),
+      out.indexOf("  teardown:"),
+    );
+    expect(previewJob).not.toContain("flyctl scale count");
+  });
 });

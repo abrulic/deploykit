@@ -1,5 +1,5 @@
 import * as p from "@clack/prompts";
-import type { DeploykitConfig } from "./config.js";
+import { type DeploykitConfig, extraRegions } from "./config.js";
 import { exec, execInteractive } from "./util/exec.js";
 import { pc } from "./util/log.js";
 
@@ -102,6 +102,12 @@ export interface DeployDeps {
     cwd: string,
   ) => Promise<boolean>;
   runDeploy: (args: string[], cwd: string) => Promise<number>;
+  /** Scale one machine into an extra region after the deploy. */
+  scaleRegion: (
+    flyApp: string,
+    region: string,
+    cwd: string,
+  ) => Promise<boolean>;
   log: {
     warn: (s: string) => void;
     success: (s: string) => void;
@@ -129,6 +135,23 @@ const defaultDeps: DeployDeps = {
       })
     ).code === 0,
   runDeploy: (args, cwd) => execInteractive({ cmd: "flyctl", args, cwd }),
+  scaleRegion: async (flyApp, region, cwd) =>
+    (
+      await exec({
+        cmd: "flyctl",
+        args: [
+          "scale",
+          "count",
+          "1",
+          "--region",
+          region,
+          "--app",
+          flyApp,
+          "--yes",
+        ],
+        cwd,
+      })
+    ).code === 0,
   log: {
     warn: (s) => p.log.warn(s),
     success: (s) => p.log.success(pc.green(s)),
@@ -202,6 +225,12 @@ export async function firstDeploy({
 
     const code = await d.runDeploy(deployArgs(t), cwd);
     if (code === 0) {
+      // Mirror CI: fan the app out to any configured extra regions.
+      for (const r of extraRegions(config.provider)) {
+        const ok = await d.scaleRegion(t.flyApp, r, cwd);
+        if (ok) d.log.info(pc.dim(`scaled ${t.flyApp} into ${r}`));
+        else d.log.warn(`Couldn't scale ${t.flyApp} into ${r} — continuing.`);
+      }
       if (t.hostname) {
         // Custom domain is the real destination — lead with it, keep the
         // fly.dev address as the dim fallback that answers immediately.

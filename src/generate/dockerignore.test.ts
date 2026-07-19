@@ -14,4 +14,11 @@ describe("generateDockerignore", () => {
     expect(out).toContain("**/.env");
     expect(out).toContain("!**/.env.example");
   });
+
+  it("ignores deploykit's own plaintext credential/secret files", () => {
+    // These live at the repo root (the Docker build context) and hold the Fly
+    // deploy token, Cloudflare token and app secret values in plaintext. They
+    // must never reach the remote builder or the shipped image.
+    expect(out).toContain(".deploykit/");
+  });
 });

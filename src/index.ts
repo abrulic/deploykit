@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { runGenerate } from "./commands/generate.js";
 import { runInit } from "./commands/init.js";
+import { runRollback } from "./commands/rollback.js";
 import type { InitOptions } from "./prompts.js";
 import { log, pc } from "./util/log.js";
 import { PKG } from "./util/pkg.js";
@@ -11,11 +12,14 @@ ${pc.bold("Usage")}
   deploykit init [options]      Detect the monorepo and set everything up
   deploykit generate [options]  Regenerate Dockerfiles/workflow/fly.toml from
                                 deploykit.config.ts (overwrites them)
+  deploykit rollback [options]  Redeploy a prior image for one environment's Fly
+                                app (app only — does not undo DB migrations)
 
 ${pc.bold("Options")}
   -y, --yes           Accept detected defaults, no prompts
       --org <slug>    Fly organization slug
-      --region <code> Fly primary region (default: iad)
+      --region <list> Fly region(s), comma-separated; first is primary, the
+                      rest are extra stateless regions (default: iad)
       --envs <list>   Environments to configure, comma-separated
                       (preview,staging,production — default: all)
       --dry-run       Detect and print the plan, write nothing
@@ -26,6 +30,9 @@ ${pc.bold("Options")}
       --pr            Commit generated files on a branch and open a PR
       --force         Overwrite existing generated files instead of skipping
       --cwd <dir>     Run against a different directory
+      --app <name>    (rollback) App to roll back (defaults to the sole app)
+      --env <kind>    (rollback) Environment: staging or production
+      --to <version>  (rollback) Release version to redeploy (non-interactive)
   -h, --help          Show this help
   -v, --version       Show version
 
@@ -33,6 +40,8 @@ ${pc.bold("Examples")}
   deploykit init
   deploykit init --yes --org my-org --region iad --dry-run
   deploykit init --yes --org my-org --envs preview,staging
+  deploykit rollback --app web --env production
+  deploykit rollback --app web --env production --to 41 --yes
 `;
 
 const ENV_KINDS = ["preview", "staging", "production"] as const;
@@ -105,9 +114,9 @@ function parseArgs(argv: string[]) {
         if (!opts.org)
           return { command, opts, help, version, error: "--org needs a value" };
         break;
-      case "--region":
-        opts.region = args[++i];
-        if (!opts.region)
+      case "--region": {
+        const raw = args[++i];
+        if (!raw)
           return {
             command,
             opts,
@@ -115,7 +124,16 @@ function parseArgs(argv: string[]) {
             version,
             error: "--region needs a value",
           };
+        // Accept a comma-separated list; the first is the primary region and
+        // any others become extra (stateless multi-region) regions.
+        const list = raw
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        opts.region = list[0];
+        if (list.length > 1) opts.regions = list;
         break;
+      }
       case "--envs": {
         const raw = args[++i];
         if (!raw)
@@ -140,6 +158,31 @@ function parseArgs(argv: string[]) {
         opts.cwd = resolve(dir);
         break;
       }
+      case "--app":
+        opts.app = args[++i];
+        if (!opts.app)
+          return { command, opts, help, version, error: "--app needs a value" };
+        break;
+      case "--env": {
+        const kind = args[++i];
+        if (!kind)
+          return { command, opts, help, version, error: "--env needs a value" };
+        if (!ENV_KINDS.some((k) => k === kind))
+          return {
+            command,
+            opts,
+            help,
+            version,
+            error: `--env: unknown environment ${kind} (valid: ${ENV_KINDS.join(", ")})`,
+          };
+        opts.env = kind as (typeof ENV_KINDS)[number];
+        break;
+      }
+      case "--to":
+        opts.to = args[++i];
+        if (!opts.to)
+          return { command, opts, help, version, error: "--to needs a value" };
+        break;
       case "-h":
       case "--help":
         help = true;
@@ -178,6 +221,8 @@ async function main() {
       return runInit(parsed.opts);
     case "generate":
       return runGenerate(parsed.opts);
+    case "rollback":
+      return runRollback(parsed.opts);
     default:
       log.error(`Unknown command: ${parsed.command}`);
       log.info(HELP);

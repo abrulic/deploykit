@@ -5,12 +5,14 @@ import {
   listCloudflareZones,
   verifyToken,
 } from "./cloudflare.js";
-import type {
-  AppConfig,
-  AppEnvironment,
-  CloudflareConfig,
-  DeploykitConfig,
-  EnvironmentKind,
+import {
+  type AppConfig,
+  type AppEnvironment,
+  type CloudflareConfig,
+  type DeploykitConfig,
+  type EnvironmentKind,
+  extraRegions,
+  type ProviderConfig,
 } from "./config.js";
 import type { DetectedApp, Detection } from "./detect.js";
 import { listFlyOrgs } from "./fly.js";
@@ -25,6 +27,12 @@ export interface InitOptions {
   yes: boolean;
   org?: string;
   region?: string;
+  /**
+   * Full desired Fly region set from `--region a,b,c` (first is the primary).
+   * Extra regions beyond the primary become `provider.regions`. Unset or a
+   * single region → single-region (byte-identical output).
+   */
+  regions?: string[];
   /** Environments to configure (skips the prompt). Defaults to all in --yes mode. */
   envs?: EnvironmentKind[];
   dryRun: boolean;
@@ -35,6 +43,12 @@ export interface InitOptions {
   /** Overwrite files that already exist instead of skipping them. */
   force: boolean;
   cwd: string;
+  /** `rollback` only: which app to roll back (defaults to the sole app). */
+  app?: string;
+  /** `rollback` only: which environment to roll back (staging/production). */
+  env?: EnvironmentKind;
+  /** `rollback` only: target release version, for non-interactive rollback. */
+  to?: string;
 }
 
 const COMMON_REGIONS = [
@@ -128,7 +142,7 @@ function buildFromDefaults({
     detection,
     apps: deployable,
     envs: opts.envs ?? ALL_ENVS,
-    provider: { org, region: opts.region ?? "iad" },
+    provider: { org, region: opts.region ?? "iad", regions: opts.regions },
     namePrefix: defaultNamePrefix(opts.cwd),
   });
 }
@@ -222,7 +236,9 @@ async function pickProvider(opts: InitOptions, flyReady: boolean) {
   });
   if (p.isCancel(region)) return null;
 
-  return { org, region };
+  // Extra regions aren't prompted (keeps the flow unchanged); they come from
+  // `--region a,b,c` or hand-editing deploykit.config.ts.
+  return { org, region, regions: opts.regions };
 }
 
 /**
@@ -493,7 +509,7 @@ function assemble({
   detection: Detection;
   apps: DetectedApp[];
   envs: EnvironmentKind[];
-  provider: { org: string; region: string };
+  provider: { org: string; region: string; regions?: string[] };
   /** Prefix for every Fly app name; "" → no prefix. */
   namePrefix?: string;
   cloudflare?: CloudflareConfig;
@@ -508,11 +524,21 @@ function assemble({
       hosts: hostnames?.[a.name],
     });
 
+  const providerConfig: ProviderConfig = {
+    type: "fly",
+    org: provider.org,
+    region: provider.region,
+  };
+  // Only record regions when there's a real extra beyond the primary, so a
+  // single-region config stays byte-identical to before this field existed.
+  if (extraRegions({ ...providerConfig, regions: provider.regions }).length)
+    providerConfig.regions = provider.regions;
+
   const config: DeploykitConfig = {
     tool: detection.tool,
     packageManager: detection.packageManager,
     nodeVersion: detection.nodeVersion,
-    provider: { type: "fly", org: provider.org, region: provider.region },
+    provider: providerConfig,
     apps: appMap,
   };
   if (namePrefix) config.namePrefix = namePrefix;

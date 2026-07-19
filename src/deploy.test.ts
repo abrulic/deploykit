@@ -174,14 +174,16 @@ function deps(over: Partial<DeployDeps> = {}) {
   const success = vi.fn();
   const info = vi.fn();
   const step = vi.fn();
+  const scaleRegion = vi.fn(async () => true);
   const base: DeployDeps = {
     confirm: vi.fn(async () => true),
     stageSecret: vi.fn(async () => true),
     runDeploy: vi.fn(async () => 0),
+    scaleRegion,
     log: { warn, success, info, step },
     ...over,
   };
-  return { d: base, warn, success, info, step };
+  return { d: base, warn, success, info, step, scaleRegion };
 }
 
 describe("firstDeploy", () => {
@@ -273,5 +275,57 @@ describe("firstDeploy", () => {
     });
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("didn't finish"));
     expect(success).not.toHaveBeenCalled();
+  });
+
+  it("does not scale when no extra regions are configured", async () => {
+    const { d, scaleRegion } = deps();
+    await firstDeploy({
+      config: stagingCfg(),
+      cwd: ".",
+      flyReady: true,
+      assumeYes: true,
+      deps: d,
+    });
+    expect(scaleRegion).not.toHaveBeenCalled();
+  });
+
+  it("scales into each extra region after a successful deploy", async () => {
+    const cfg = stagingCfg();
+    cfg.provider.regions = ["iad", "lhr", "fra"];
+    const { d, scaleRegion } = deps();
+    await firstDeploy({
+      config: cfg,
+      cwd: "/repo",
+      flyReady: true,
+      assumeYes: true,
+      deps: d,
+    });
+    expect(scaleRegion).toHaveBeenCalledTimes(2);
+    expect(scaleRegion).toHaveBeenCalledWith(
+      "acme-web-staging",
+      "lhr",
+      "/repo",
+    );
+    expect(scaleRegion).toHaveBeenCalledWith(
+      "acme-web-staging",
+      "fra",
+      "/repo",
+    );
+  });
+
+  it("warns but continues when a region scale fails", async () => {
+    const cfg = stagingCfg();
+    cfg.provider.regions = ["iad", "lhr"];
+    const { d, warn } = deps({ scaleRegion: vi.fn(async () => false) });
+    await firstDeploy({
+      config: cfg,
+      cwd: ".",
+      flyReady: true,
+      assumeYes: true,
+      deps: d,
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("Couldn't scale"),
+    );
   });
 });

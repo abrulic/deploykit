@@ -37,7 +37,7 @@ Flags:
 |------|-------------|
 | `--yes`, `-y` | Accept detected defaults, no prompts. |
 | `--org <slug>` | Fly organization slug. |
-| `--region <code>` | Fly primary region (e.g. `iad`). |
+| `--region <list>` | Fly region(s), comma-separated. The first is the primary; any others are extra **stateless** regions the app is scaled into after each deploy (e.g. `iad,lhr,fra`). |
 | `--dry-run` | Detect and print the plan, but write nothing. |
 | `--provision` | Create Fly apps and set the `FLY_API_TOKEN` GitHub secret (each step confirmed). |
 | `--pr` | Commit the generated files on a branch and open a PR. |
@@ -53,12 +53,65 @@ apps/<app>/fly.toml
 deploykit.config.ts             source of truth for every decision
 ```
 
+Each `fly.toml` includes an HTTP health check (`/` by default; set
+`healthCheckPath` per app in `deploykit.config.ts` for an API that 404s at `/`).
+Fly waits for it before shifting traffic to a new release and keeps the old
+machines running if it fails — so a bad deploy rolls itself back.
+
+## Rolling back
+
+When a release deployed cleanly but turned out bad, redeploy a previous image:
+
+```bash
+deploykit rollback --app web --env production
+```
+
+It lists the environment's Fly releases, lets you pick one, shows the exact
+`flyctl deploy --image …` it will run, and asks before doing it. Use
+`--to <version> --yes` to script it. This rolls back the **app image only** — it
+does **not** undo database migrations, so an older image may not run against a
+schema a newer release migrated.
+
+## Multiple regions
+
+Pass more than one region and the extras become **stateless** regions the app is
+scaled into after each staging/production deploy (previews stay single-region):
+
+```bash
+deploykit init --region iad,lhr,fra      # primary iad, plus lhr and fra
+```
+
+You can also set `regions` under `provider` in `deploykit.config.ts`. Each extra
+region gets one machine via `flyctl scale count 1 --region <r>` after the deploy.
+This is for **stateless** apps: deploykit does not model database locality, so a
+far-region machine still talks to whatever single-region `DATABASE_URL` you set —
+expect high write latency. Read replicas / `fly-replay` are out of scope.
+
+## Database migrations
+
+deploykit does **not** run migrations — a bad one causes irreversible data loss,
+and owning that is out of scope. Instead, when it detects a Prisma schema in an
+app it writes a **commented-out** hook into that app's `fly.toml`:
+
+```toml
+# [deploy]
+#   release_command = "(cd packages/db && npx prisma migrate deploy --schema ./prisma/schema.prisma)"
+```
+
+`[deploy].release_command` is Fly's idiomatic migration hook: it runs once per
+release, before new machines take traffic. Uncomment it only against a database
+you own, and make sure the Prisma CLI and schema are present in your runtime
+image. Note that `deploykit rollback` reverts the **image only** — it does not
+undo a migration this hook applied, so prefer additive (expand/contract)
+migrations. Using another tool (Drizzle, Knex, …)? Uncomment and swap the
+command for its migrate step.
+
 ## Scope (v1)
 
 - **Turbo** monorepos — full support (`turbo prune` multi-stage builds).
 - **Nx** monorepos — supported via `nx build` + `dist/<projectRoot>` output. Node-server and static (Vite/Astro) apps are solid; Next/SSR Dockerfiles follow Nx conventions but are worth a glance before your first deploy.
 - **Fly.io** as the deploy target.
-- **No database provisioning** — databases are a separate concern; see the roadmap.
+- **No database provisioning** — deploykit provisions no database. It detects Prisma and writes a commented, opt-in migration hook (see [Database migrations](#database-migrations)); the database itself is yours to create and own.
 
 ## Security & Privacy
 
