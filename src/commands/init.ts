@@ -149,7 +149,8 @@ export async function runInit(opts: InitOptions) {
   // provisioning (which creates the apps + secrets), and only when we can
   // prompt or the user explicitly opted in with --deploy. Runs before the PR
   // step, which moves the generated files onto a branch and off the work tree.
-  if (provisioned && (interactive || opts.deploy)) {
+  const deployAttempted = provisioned && (interactive || opts.deploy);
+  if (deployAttempted) {
     phases.begin("Deploy");
     await firstDeploy({
       config,
@@ -158,6 +159,15 @@ export async function runInit(opts: InitOptions) {
       assumeYes: opts.deploy,
       captured: captured.get("staging") ?? [],
     });
+  }
+
+  // ── Cloudflare ──
+  // Runs after the first deploy: issuing Fly certs and wiring DNS needs the app
+  // to have allocated IPs, which only happens once it's been deployed — not at
+  // `fly apps create`. Skipped inline when there's no `cloudflare` block.
+  if (provisioned) {
+    phases.begin("Cloudflare");
+    await provisionCloudflareStep({ config, opts, flyReady, deployAttempted });
   }
 
   // ── Open PR ──
@@ -206,8 +216,8 @@ async function runProvisioning({
   }
 
   await provisionFlyApps({ config, opts, flyReady });
-  // Cloudflare certs need the Fly apps to exist first, so this runs after.
-  await provisionCloudflareStep({ config, opts, flyReady });
+  // Cloudflare runs later, after the first deploy — certs need the apps to have
+  // allocated IPs (which happens on deploy), not merely to exist. See below.
   if (flyReady && repo)
     await provisionFlyToken({ config, opts, repo, capture });
   if (repo) await provisionEnvironments({ config, opts, repo });
@@ -226,10 +236,13 @@ async function provisionCloudflareStep({
   config,
   opts,
   flyReady,
+  deployAttempted,
 }: {
   config: DeploykitConfig;
   opts: InitOptions;
   flyReady: boolean;
+  /** Whether the first-deploy step ran — certs need the app's IPs to be allocated. */
+  deployAttempted: boolean;
 }) {
   const cf = config.cloudflare;
   if (!cf) return;
@@ -247,6 +260,15 @@ async function provisionCloudflareStep({
   }
   const targets = domainTargets(config);
   if (targets.length === 0) return;
+
+  // Without a first deploy the Fly apps have no allocated IPs, so `flyctl certs`
+  // returns no routable DNS target and validation can't complete. Flag it up
+  // front rather than letting each hostname fail with the same underlying cause.
+  if (!deployAttempted) {
+    p.log.warn(
+      "No first deploy ran — Fly certs need the app deployed (IPs allocated). Re-run `deploykit init` with `--deploy`, or after the app's first deploy, to finish Cloudflare.",
+    );
+  }
 
   if (
     !(await confirm({
