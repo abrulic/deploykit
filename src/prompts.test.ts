@@ -19,6 +19,7 @@ const app: DetectedApp = {
   internalDeps: ["@acme/ui"],
   watchPaths: ["apps/web/**", "packages/ui/**"],
   secrets: ["DATABASE_URL"],
+  buildEnv: ["NEXT_PUBLIC_API_URL"],
   hasDockerfile: false,
   hasFlyToml: false,
 };
@@ -76,6 +77,14 @@ describe("buildConfig (non-interactive)", () => {
     });
   });
 
+  it("honors --envs in non-interactive mode instead of enabling all three", async () => {
+    const config = await buildConfig({
+      detection,
+      opts: { ...baseOpts, org: "acme", envs: ["staging"] },
+    });
+    expect(Object.keys(config?.apps.web?.environments ?? {})).toEqual(["staging"]);
+  });
+
   it("defaults the region to iad when not provided", async () => {
     const config = await buildConfig({ detection, opts: { ...baseOpts, org: "acme" } });
     expect(config?.provider.region).toBe("iad");
@@ -123,6 +132,12 @@ describe("buildConfig (non-interactive)", () => {
     expect(config?.nxIntegrated).toBeUndefined();
     expect(config?.apps.web).not.toHaveProperty("prisma");
     expect(config?.apps.web).not.toHaveProperty("startCommand");
+  });
+
+  it("persists build-time env vars separately from runtime secrets", async () => {
+    const config = await buildConfig({ detection, opts: { ...baseOpts, org: "acme" } });
+    expect(config?.apps.web?.secrets).toEqual(["DATABASE_URL"]);
+    expect(config?.apps.web?.buildEnv).toEqual(["NEXT_PUBLIC_API_URL"]);
   });
 });
 

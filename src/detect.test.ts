@@ -109,6 +109,58 @@ describe("detect", () => {
     expect(api?.secrets).toContain("API_KEY");
   });
 
+  it("finds env vars read inside internal workspace deps", () => {
+    const tree = writeTree({
+      files: {
+        ...MONOREPO,
+        // web depends on @acme/ui; a var read there belongs to web's closure.
+        "packages/ui/src/theme.ts": "const k = process.env.SHARED_KEY;\n",
+      },
+    });
+    cleanup = tree.cleanup;
+    const web = detect(tree.root).apps.find((a) => a.name === "web");
+    expect(web?.secrets).toContain("SHARED_KEY");
+    // api does not depend on @acme/ui — no bleed-through.
+    const api = detect(tree.root).apps.find((a) => a.name === "api");
+    expect(api?.secrets).not.toContain("SHARED_KEY");
+  });
+
+  it("classifies client-exposed prefixes as build-time for server apps", () => {
+    const tree = writeTree({
+      files: {
+        ...MONOREPO,
+        "apps/web/src/env.ts":
+          "export const url = process.env.NEXT_PUBLIC_API_URL;\n",
+      },
+    });
+    cleanup = tree.cleanup;
+    const web = detect(tree.root).apps.find((a) => a.name === "web");
+    expect(web?.buildEnv).toContain("NEXT_PUBLIC_API_URL");
+    expect(web?.secrets).not.toContain("NEXT_PUBLIC_API_URL");
+    // Runtime vars stay runtime.
+    expect(web?.secrets).toContain("DATABASE_URL");
+  });
+
+  it("treats every var of a static app as build-time (import.meta.env too)", () => {
+    const tree = writeTree({
+      files: {
+        ...MONOREPO,
+        "apps/spa/package.json": JSON.stringify({
+          name: "@acme/spa",
+          devDependencies: { vite: "5" },
+        }),
+        "apps/spa/src/main.ts":
+          "const a = import.meta.env.VITE_API_URL; const b = import.meta.env.APP_MODE;\n",
+      },
+    });
+    cleanup = tree.cleanup;
+    const spa = detect(tree.root).apps.find((a) => a.name === "spa");
+    expect(spa?.serve).toBe("static");
+    // No runtime process → nothing can be a runtime secret.
+    expect(spa?.buildEnv).toEqual(expect.arrayContaining(["VITE_API_URL", "APP_MODE"]));
+    expect(spa?.secrets).toEqual([]);
+  });
+
   it("returns no apps for a bare monorepo", () => {
     const tree = writeTree({
       files: { "turbo.json": "{}", "package.json": JSON.stringify({ name: "root" }) },

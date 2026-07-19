@@ -38,6 +38,17 @@ describe("generateWorkflow", () => {
     expect(yaml).toContain('DATABASE_URL="$SECRET_DATABASE_URL"');
   });
 
+  it("forwards build-time vars as --build-arg instead of runtime secrets", () => {
+    expect(yaml).toContain("SECRET_NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}");
+    expect(yaml).toContain(
+      'if [ -n "$SECRET_NEXT_PUBLIC_API_URL" ]; then BUILD_ARGS+=(--build-arg "NEXT_PUBLIC_API_URL=$SECRET_NEXT_PUBLIC_API_URL"); fi',
+    );
+    // Build vars must NOT be staged as Fly runtime secrets — too late to matter.
+    expect(yaml).not.toContain("flyctl secrets set --stage --app \"$FLY_APP\" NEXT_PUBLIC_API_URL");
+    // And the deploy command forwards the collected args.
+    expect(yaml).toContain('${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"}');
+  });
+
   it("never expands a secret expression inside a run script (shell injection)", () => {
     // ${{ secrets.* }} may only appear in env: blocks — GitHub substitutes the
     // raw value into run: scripts, so a value with quotes/$ would execute.

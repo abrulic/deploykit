@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { runGenerate } from "./commands/generate.js";
 import { runInit } from "./commands/init.js";
 import type { InitOptions } from "./prompts.js";
 import { log, pc } from "./util/log.js";
@@ -7,12 +8,16 @@ import { PKG } from "./util/pkg.js";
 const HELP = `${pc.bold("deploykit")} — automate CI/CD for Turbo monorepos on Fly.io
 
 ${pc.bold("Usage")}
-  deploykit init [options]
+  deploykit init [options]      Detect the monorepo and set everything up
+  deploykit generate [options]  Regenerate Dockerfiles/workflow/fly.toml from
+                                deploykit.config.ts (overwrites them)
 
 ${pc.bold("Options")}
   -y, --yes           Accept detected defaults, no prompts
       --org <slug>    Fly organization slug
       --region <code> Fly primary region (default: iad)
+      --envs <list>   Environments to configure, comma-separated
+                      (preview,staging,production — default: all)
       --dry-run       Detect and print the plan, write nothing
       --provision     Force provisioning in --yes mode (Fly apps, FLY_API_TOKEN,
                       GitHub environments). Interactive runs offer it inline.
@@ -25,7 +30,28 @@ ${pc.bold("Options")}
 ${pc.bold("Examples")}
   deploykit init
   deploykit init --yes --org my-org --region iad --dry-run
+  deploykit init --yes --org my-org --envs preview,staging
 `;
+
+const ENV_KINDS = ["preview", "staging", "production"] as const;
+
+/** Parse `--envs preview,staging` into a validated list, or an error string. */
+function parseEnvs(raw: string):
+  | { envs: InitOptions["envs"]; error?: undefined }
+  | { error: string } {
+  const parts = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return { error: "--envs needs a value" };
+  const bad = parts.filter((x) => !(ENV_KINDS as readonly string[]).includes(x));
+  if (bad.length) {
+    return {
+      error: `--envs: unknown environment(s) ${bad.join(", ")} (valid: ${ENV_KINDS.join(", ")})`,
+    };
+  }
+  return { envs: [...new Set(parts)] as InitOptions["envs"] };
+}
 
 function parseArgs(argv: string[]) {
   const opts: InitOptions = {
@@ -75,6 +101,16 @@ function parseArgs(argv: string[]) {
         opts.region = args[++i];
         if (!opts.region) return { command, opts, help, version, error: "--region needs a value" };
         break;
+      case "--envs": {
+        const raw = args[++i];
+        if (!raw) return { command, opts, help, version, error: "--envs needs a value" };
+        const parsed = parseEnvs(raw);
+        if (parsed.error !== undefined) {
+          return { command, opts, help, version, error: parsed.error };
+        }
+        opts.envs = parsed.envs;
+        break;
+      }
       case "--cwd": {
         const dir = args[++i];
         if (!dir) return { command, opts, help, version, error: "--cwd needs a value" };
@@ -117,6 +153,8 @@ async function main() {
   switch (parsed.command) {
     case "init":
       return runInit(parsed.opts);
+    case "generate":
+      return runGenerate(parsed.opts);
     default:
       log.error(`Unknown command: ${parsed.command}`);
       log.info(HELP);

@@ -22,7 +22,7 @@ export const PM: Record<PackageManager, PmCommands> = {
     run: "npx",
     exec: "npx",
     dlx: "npx --yes",
-    install: "npm install",
+    install: "npm ci",
   },
   yarn: {
     run: "yarn",
@@ -72,6 +72,18 @@ export const installLine = (pm: PmCommands, config: DeploykitConfig) => {
         .join(" ")} `
     : "";
   return `${prefix}${pm.install}${ignoreScripts ? " --ignore-scripts" : ""}`;
+};
+
+/**
+ * ARG/ENV lines for the app's build-time vars (NEXT_PUBLIC_*, VITE_*, and all
+ * vars of a static app). Declared in the build stage so `--build-arg` values
+ * from CI are visible to the framework build and baked into the bundle —
+ * setting them as Fly *runtime* secrets would be too late for these.
+ */
+export const buildEnvLines = (app: AppConfig): string => {
+  const names = app.buildEnv ?? [];
+  if (names.length === 0) return "";
+  return `${names.map((n) => `ARG ${n}\nENV ${n}=$${n}`).join("\n")}\n`;
 };
 
 /**

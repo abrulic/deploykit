@@ -2,6 +2,7 @@ import type { AppConfig, DeploykitConfig } from "../config.js";
 import {
   PM,
   baseStage,
+  buildEnvLines,
   fileHeader,
   installLine,
   nodeImage,
@@ -32,7 +33,7 @@ FROM base AS build
 WORKDIR /app
 COPY . .
 RUN ${installLine(pm, config)}
-${prismaSteps(app, pm)}RUN ${pm.run} nx build ${project}${productionFlag}
+${buildEnvLines(app)}${prismaSteps(app, pm)}RUN ${pm.run} nx build ${project}${productionFlag}
 `;
 
   return head + "\n" + runner({ app, config }) + "\n";

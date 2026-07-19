@@ -28,6 +28,7 @@ export const sampleWebApp: AppConfig = {
     production: { name: "web-prod", trigger: "manual" },
   },
   secrets: ["DATABASE_URL", "NEXTAUTH_SECRET"],
+  buildEnv: ["NEXT_PUBLIC_API_URL"],
 };
 
 /** A Node server app with only staging — exercises per-app env omission. */

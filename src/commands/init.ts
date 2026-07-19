@@ -583,6 +583,13 @@ function nextSteps({ config, opts }: { config: DeploykitConfig; opts: InitOption
   } else {
     lines.push(pc.dim("  • Anything you skipped above can be re-run with `deploykit init`."));
   }
+  // The environment alone doesn't gate anything — the approval prompt only
+  // appears once reviewers are configured, which needs a human choice.
+  if (Object.values(config.apps).some((a) => a.environments.production)) {
+    lines.push(
+      "  • Add required reviewers to the GitHub `production` environment (Settings → Environments) to gate production deploys.",
+    );
+  }
   if (!opts.pr) lines.push("  • Commit the generated files and open a PR.");
   lines.push("  • Open a pull request to get your first preview environment 🚀");
   return lines.join("\n");

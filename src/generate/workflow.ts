@@ -219,29 +219,37 @@ ${secretEnvLines}        run: |
           FLY_APP=${flyAppExpr}
           echo "Deploying $APP -> $FLY_APP"
           flyctl status --app "$FLY_APP" >/dev/null 2>&1 || flyctl apps create "$FLY_APP" --org "$FLY_ORG"
+          BUILD_ARGS=()
 ${rootAndSecretsCase({ config, indent: 10 })}
           flyctl deploy . \\
             --config "$ROOT/fly.toml" \\
             --dockerfile "$ROOT/Dockerfile" \\
             --app "$FLY_APP" \\
-            --remote-only${haFlag}
+            --remote-only${haFlag} \${BUILD_ARGS[@]+"\${BUILD_ARGS[@]}"}
 `;
 }
 
-/** Unique secret names across every configured app, for the step env block. */
+/**
+ * Unique secret names across every configured app — runtime secrets *and*
+ * build-time vars (both live as GitHub secrets; they differ only in how the
+ * deploy step forwards them). Used for the step env block.
+ */
 function allSecretNames(config: DeploykitConfig): string[] {
   const names = new Set<string>();
   for (const app of Object.values(config.apps)) {
     for (const s of app.secrets) names.add(s);
+    for (const b of app.buildEnv ?? []) names.add(b);
   }
   return [...names].sort();
 }
 
 /**
- * A shell `case` over the matrix app that sets $ROOT and stages each app's
- * secrets (guarded so unset secrets are skipped instead of cleared). Secret
- * values are read from the SECRET_<name> env vars set on the step — see
- * deployStep — so their contents never appear in the script text.
+ * A shell `case` over the matrix app that sets $ROOT, stages each app's
+ * *runtime* secrets (guarded so unset secrets are skipped instead of cleared)
+ * and collects its *build-time* vars into the BUILD_ARGS array the deploy
+ * command forwards as `--build-arg`. Values are read from the SECRET_<name>
+ * env vars set on the step — see deployStep — so their contents never appear
+ * in the script text.
  */
 function rootAndSecretsCase({
   config,
@@ -258,6 +266,11 @@ function rootAndSecretsCase({
     for (const s of app.secrets) {
       lines.push(
         `${pad3}if [ -n "$SECRET_${s}" ]; then flyctl secrets set --stage --app "$FLY_APP" ${s}="$SECRET_${s}"; fi`,
+      );
+    }
+    for (const b of app.buildEnv ?? []) {
+      lines.push(
+        `${pad3}if [ -n "$SECRET_${b}" ]; then BUILD_ARGS+=(--build-arg "${b}=$SECRET_${b}"); fi`,
       );
     }
     lines.push(`${pad3};;`);

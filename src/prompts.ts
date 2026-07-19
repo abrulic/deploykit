@@ -21,6 +21,8 @@ export interface InitOptions {
   yes: boolean;
   org?: string;
   region?: string;
+  /** Environments to configure (skips the prompt). Defaults to all in --yes mode. */
+  envs?: EnvironmentKind[];
   dryRun: boolean;
   provision: boolean;
   pr: boolean;
@@ -70,7 +72,8 @@ export async function buildConfig({
   const chosenApps = await pickApps(deployable);
   if (!chosenApps) return cancel();
 
-  const envs = await pickEnvironments();
+  // --envs picks the environments up front; otherwise ask.
+  const envs = opts.envs ?? (await pickEnvironments());
   if (!envs) return cancel();
 
   const provider = await pickProvider(opts, flyReady);
@@ -114,7 +117,7 @@ function buildFromDefaults({
   return assemble({
     detection,
     apps: deployable,
-    envs: ALL_ENVS,
+    envs: opts.envs ?? ALL_ENVS,
     provider: { org, region: opts.region ?? "iad" },
     namePrefix: defaultNamePrefix(opts.cwd),
   });
@@ -382,13 +385,18 @@ async function typeZone(): Promise<string | null> {
   return p.isCancel(zoneInput) ? null : zoneInput.trim();
 }
 
-/** Surface detected secret names so the user knows what they'll need to set. */
+/** Surface detected env var names so the user knows what they'll need to set. */
 function noteSecrets(apps: DetectedApp[]) {
-  const withSecrets = apps.filter((a) => a.secrets.length);
-  if (!withSecrets.length) return;
+  const withVars = apps.filter((a) => a.secrets.length || a.buildEnv.length);
+  if (!withVars.length) return;
   p.note(
-    withSecrets
-      .map((a) => `${pc.bold(a.name)}: ${a.secrets.join(", ")}`)
+    withVars
+      .map((a) => {
+        const parts = [];
+        if (a.secrets.length) parts.push(a.secrets.join(", "));
+        if (a.buildEnv.length) parts.push(`${pc.dim("build-time:")} ${a.buildEnv.join(", ")}`);
+        return `${pc.bold(a.name)}: ${parts.join(" · ")}`;
+      })
       .join("\n"),
     "Detected env vars (names only — set these as GitHub secrets)",
   );
@@ -473,6 +481,7 @@ function appConfigFor({
   if (app.outputDir) config.outputDir = app.outputDir;
   if (app.spa) config.spa = true;
   if (app.prisma?.length) config.prisma = app.prisma;
+  if (app.buildEnv.length) config.buildEnv = app.buildEnv;
   return config;
 }
 

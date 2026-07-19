@@ -57,7 +57,10 @@ export interface DetectedApp {
   internalDeps: string[];
   /** Globs that should trigger a redeploy: own dir + every internal dep dir. */
   watchPaths: string[];
+  /** Runtime env var names (staged as Fly secrets by the workflow). */
   secrets: string[];
+  /** Build-time var names (passed as --build-arg; baked into the bundle). */
+  buildEnv: string[];
   hasDockerfile: boolean;
   hasFlyToml: boolean;
 }
@@ -221,6 +224,10 @@ function detectPackageProjects({
       tool,
     });
 
+    const { secrets, buildEnv } = splitEnvVars(
+      detectSecrets({ cwd, appDir: r.dir, depDirs }),
+      serveInfo.serve,
+    );
     apps.push({
       name: lastSegment(r.dir),
       root: r.dir,
@@ -236,7 +243,8 @@ function detectPackageProjects({
         "package.json",
         `${tool}.json`,
       ],
-      secrets: detectSecrets({ cwd, appDir: r.dir }),
+      secrets,
+      buildEnv,
       hasDockerfile: fileExists(join(cwd, r.dir, "Dockerfile")),
       hasFlyToml: fileExists(join(cwd, r.dir, "fly.toml")),
     });
@@ -283,6 +291,10 @@ function detectNxProjects({ cwd }: { cwd: string }): Projects {
       tool: "nx",
     });
 
+    const { secrets, buildEnv } = splitEnvVars(
+      detectSecrets({ cwd, appDir: root, depDirs }),
+      serveInfo.serve,
+    );
     apps.push({
       name: lastSegment(root),
       root,
@@ -298,7 +310,8 @@ function detectNxProjects({ cwd }: { cwd: string }): Projects {
         "package.json",
         "nx.json",
       ],
-      secrets: detectSecrets({ cwd, appDir: root }),
+      secrets,
+      buildEnv,
       hasDockerfile: fileExists(join(cwd, root, "Dockerfile")),
       hasFlyToml: fileExists(join(cwd, root, "fly.toml")),
     });
@@ -607,7 +620,21 @@ function transitiveDeps(start: string, byName: Map<string, RawPackage>) {
   return [...seen].sort();
 }
 
-function detectSecrets({ cwd, appDir }: { cwd: string; appDir: string }) {
+/**
+ * Env var names an app needs: keys from example env files (root + app dir) and
+ * `process.env.X` / `import.meta.env.X` references in the app's own source
+ * **and its internal workspace deps** — a server whose DATABASE_URL read lives
+ * in packages/db still needs the secret.
+ */
+function detectSecrets({
+  cwd,
+  appDir,
+  depDirs = [],
+}: {
+  cwd: string;
+  appDir: string;
+  depDirs?: string[];
+}) {
   const names = new Set<string>();
   const envFiles = [
     ".env.example",
@@ -626,22 +653,43 @@ function detectSecrets({ cwd, appDir }: { cwd: string; appDir: string }) {
     }
   }
 
-  const files = walkFilesByExt({
-    root: cwd,
-    subdir: appDir,
-    exts: ["ts", "tsx", "js", "jsx", "mjs"],
-    limit: 200,
-  });
-  for (const f of files) {
-    const text = readText(join(cwd, f));
-    if (!text) continue;
-    const re = /process\.env\.([A-Z][A-Z0-9_]*)/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(text))) {
-      if (m[1]) names.add(m[1]);
+  for (const dir of [appDir, ...depDirs]) {
+    const files = walkFilesByExt({
+      root: cwd,
+      subdir: dir,
+      exts: ["ts", "tsx", "js", "jsx", "mjs"],
+      limit: 200,
+    });
+    for (const f of files) {
+      const text = readText(join(cwd, f));
+      if (!text) continue;
+      const re = /(?:process\.env|import\.meta\.env)\.([A-Z][A-Z0-9_]*)/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(text))) {
+        if (m[1]) names.add(m[1]);
+      }
     }
   }
   return [...names].filter((n) => !ENV_DENYLIST.has(n)).sort();
+}
+
+/** Prefixes frameworks expose to client bundles — their values bake in at build. */
+const BUILD_ENV_PREFIXES = ["NEXT_PUBLIC_", "VITE_", "PUBLIC_", "REACT_APP_"];
+
+/**
+ * Split detected env var names into runtime secrets vs build-time vars. A
+ * static app has no server process, so *everything* it reads is build-time;
+ * a server app bakes only the client-exposed prefixes and reads the rest at
+ * runtime via Fly secrets.
+ */
+export function splitEnvVars(
+  names: string[],
+  serve: ServeModel,
+): { secrets: string[]; buildEnv: string[] } {
+  if (serve === "static") return { secrets: [], buildEnv: names };
+  const buildEnv = names.filter((n) => BUILD_ENV_PREFIXES.some((p) => n.startsWith(p)));
+  const secrets = names.filter((n) => !buildEnv.includes(n));
+  return { secrets, buildEnv };
 }
 
 const lastSegment = (p: string) => p.split("/").at(-1) ?? p;
