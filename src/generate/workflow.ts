@@ -1,4 +1,8 @@
-import type { DeploykitConfig, EnvironmentKind } from "../config.js";
+import {
+  type DeploykitConfig,
+  type EnvironmentKind,
+  extraRegions,
+} from "../config.js";
 
 /** Render a GitHub Actions expression: gh("secrets.X") -> "${{ secrets.X }}". */
 // biome-ignore lint/style/useTemplate: a template literal collides with the `${{` GitHub Actions delimiter
@@ -239,6 +243,22 @@ function deployStep({
   const secretEnvLines = allSecretNames(config)
     .map((s) => `          SECRET_${s}: ${gh(`secrets.${s}`)}\n`)
     .join("");
+  // Stateless multi-region: after the deploy, ensure one machine in each extra
+  // region. Previews stay single-region (ephemeral, not worth the extra cost).
+  // Empty when no extra regions are configured, so single-region output is
+  // byte-for-byte unchanged.
+  const extras = env === "preview" ? [] : extraRegions(config.provider);
+  // Best-effort: the deploy has already succeeded by here, so a transient scale
+  // error must not fail the job (set -euo pipefail is active) or skip the rest
+  // of the regions — mirror the local firstDeploy path, which warns and
+  // continues. `|| echo ::warning::` surfaces it without a red build.
+  const scaleBlock = extras.length
+    ? `
+          # Run in extra regions too (stateless multi-region), best-effort.
+          for R in ${extras.join(" ")}; do
+            flyctl scale count 1 --region "$R" --app "$FLY_APP" --yes || echo "::warning::could not scale $FLY_APP into $R"
+          done`
+    : "";
   return `      - name: Deploy (${env})
 ${guard}        env:
           FLY_API_TOKEN: ${gh("secrets.FLY_API_TOKEN")}
@@ -254,7 +274,7 @@ ${rootAndSecretsCase({ config, indent: 10 })}
             --config "$ROOT/fly.toml" \\
             --dockerfile "$ROOT/Dockerfile" \\
             --app "$FLY_APP" \\
-            --remote-only${haFlag} \${BUILD_ARGS[@]+"\${BUILD_ARGS[@]}"}
+            --remote-only${haFlag} \${BUILD_ARGS[@]+"\${BUILD_ARGS[@]}"}${scaleBlock}
 `;
 }
 

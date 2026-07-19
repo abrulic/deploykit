@@ -52,6 +52,30 @@ export interface ProviderConfig {
   org: string;
   /** Default primary region, e.g. "iad". */
   region: string;
+  /**
+   * Extra Fly regions to also run in, beyond `region`. After each non-preview
+   * deploy, one machine is scaled up in every region here that isn't already the
+   * primary. Omitted/empty → single-region (the default, byte-identical output).
+   *
+   * For STATELESS apps only: deploykit does not model database locality, so a
+   * machine here still talks to whatever single-region `DATABASE_URL` you set —
+   * expect high write latency from far regions. Don't use this for stateful apps
+   * without a read-replica / fly-replay strategy of your own.
+   */
+  regions?: string[];
+}
+
+/**
+ * Regions to scale into beyond the primary: `provider.regions` with the primary
+ * removed and duplicates dropped. Empty (the default) means single-region, and
+ * every generator falls back to today's exact output.
+ */
+export function extraRegions(provider: ProviderConfig): string[] {
+  const out: string[] = [];
+  for (const r of provider.regions ?? []) {
+    if (r && r !== provider.region && !out.includes(r)) out.push(r);
+  }
+  return out;
 }
 
 export interface AppEnvironment {
@@ -126,6 +150,13 @@ export interface AppConfig {
   prisma?: PrismaTarget[];
   /** Internal port the server listens on inside the container. */
   port: number;
+  /**
+   * HTTP path Fly polls to decide a release is healthy. A failing check keeps
+   * the previous machines serving (auto-rollback on a bad deploy). Defaults to
+   * "/", which most apps answer with a 2xx/3xx; set it to a lightweight endpoint
+   * (e.g. "/health") for an API whose "/" 404s, or it would wedge the deploy.
+   */
+  healthCheckPath?: string;
   /** Names of internal workspace packages this app depends on. */
   internalDeps: string[];
   /**

@@ -26,6 +26,12 @@ export function generateDockerignore(): string {
 **/.env.*
 !**/.env.example
 
+# deploykit's own plaintext credential/secret files (see src/secrets-file.ts).
+# Gitignored already, but the Docker build context is the repo root, so they
+# must be excluded here too — otherwise they upload to the remote builder and,
+# for apps that COPY the whole context, bake into the shipped image.
+.deploykit/
+
 Dockerfile
 **/Dockerfile
 .dockerignore

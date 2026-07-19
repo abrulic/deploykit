@@ -37,7 +37,7 @@ Flags:
 |------|-------------|
 | `--yes`, `-y` | Accept detected defaults, no prompts. |
 | `--org <slug>` | Fly organization slug. |
-| `--region <code>` | Fly primary region (e.g. `iad`). |
+| `--region <list>` | Fly region(s), comma-separated. The first is the primary; any others are extra **stateless** regions the app is scaled into after each deploy (e.g. `iad,lhr,fra`). |
 | `--dry-run` | Detect and print the plan, but write nothing. |
 | `--provision` | Create Fly apps and set the `FLY_API_TOKEN` GitHub secret (each step confirmed). |
 | `--pr` | Commit the generated files on a branch and open a PR. |
@@ -52,6 +52,40 @@ apps/<app>/fly.toml
 .github/workflows/deploy.yml    changes → preview / teardown / staging / production
 deploykit.config.ts             source of truth for every decision
 ```
+
+Each `fly.toml` includes an HTTP health check (`/` by default; set
+`healthCheckPath` per app in `deploykit.config.ts` for an API that 404s at `/`).
+Fly waits for it before shifting traffic to a new release and keeps the old
+machines running if it fails — so a bad deploy rolls itself back.
+
+## Rolling back
+
+When a release deployed cleanly but turned out bad, redeploy a previous image:
+
+```bash
+deploykit rollback --app web --env production
+```
+
+It lists the environment's Fly releases, lets you pick one, shows the exact
+`flyctl deploy --image …` it will run, and asks before doing it. Use
+`--to <version> --yes` to script it. This rolls back the **app image only** — it
+does **not** undo database migrations, so an older image may not run against a
+schema a newer release migrated.
+
+## Multiple regions
+
+Pass more than one region and the extras become **stateless** regions the app is
+scaled into after each staging/production deploy (previews stay single-region):
+
+```bash
+deploykit init --region iad,lhr,fra      # primary iad, plus lhr and fra
+```
+
+You can also set `regions` under `provider` in `deploykit.config.ts`. Each extra
+region gets one machine via `flyctl scale count 1 --region <r>` after the deploy.
+This is for **stateless** apps: deploykit does not model database locality, so a
+far-region machine still talks to whatever single-region `DATABASE_URL` you set —
+expect high write latency. Read replicas / `fly-replay` are out of scope.
 
 ## Scope (v1)
 

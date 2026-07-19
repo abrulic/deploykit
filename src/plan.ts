@@ -33,7 +33,12 @@ export function renderPlan({ config, files, opts }: RenderPlanInput) {
   lines.push("");
   lines.push(pc.bold("Files"));
   for (const f of files) {
-    const tag = f.exists ? pc.yellow(" (exists — skip)") : pc.green(" (new)");
+    const tag =
+      f.status === "new"
+        ? pc.green(" (new)")
+        : f.status === "identical"
+          ? pc.dim(" (exists — unchanged)")
+          : pc.yellow(" (exists — differs, kept; use --force to overwrite)");
     lines.push(`  ${f.path}${tag}`);
   }
 

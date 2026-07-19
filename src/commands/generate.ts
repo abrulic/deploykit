@@ -28,10 +28,15 @@ export async function runGenerate(opts: InitOptions) {
 
   p.note(
     files
-      .map(
-        (f) =>
-          `  ${f.path}${f.exists ? pc.yellow(" (overwrite)") : pc.green(" (new)")}`,
-      )
+      .map((f) => {
+        const tag =
+          f.status === "new"
+            ? pc.green(" (new)")
+            : f.status === "identical"
+              ? pc.dim(" (unchanged)")
+              : pc.yellow(" (overwrite)");
+        return `  ${f.path}${tag}`;
+      })
       .join("\n"),
     `Regenerate from ${CONFIG_FILE}`,
   );

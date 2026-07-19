@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(gh run *)",
-      "Bash(pnpm knip *)"
+      "Bash(pnpm knip *)",
+      "Bash(pnpm vitest *)",
+      "Bash(pnpm biome *)"
     ]
   }
 }

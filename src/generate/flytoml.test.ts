@@ -22,4 +22,21 @@ describe("generateFlyToml", () => {
     expect(toml).toContain('processes = ["app"]');
     expect(toml).toContain("[[vm]]");
   });
+
+  it("adds an HTTP health check on / by default (gates Fly auto-rollback)", () => {
+    expect(toml).toContain("[[http_service.checks]]");
+    expect(toml).toContain('method = "GET"');
+    expect(toml).toContain('path = "/"');
+    expect(toml).toContain('grace_period = "10s"');
+  });
+
+  it("uses a configured healthCheckPath when set", () => {
+    const custom = generateFlyToml({
+      name: "api",
+      app: { ...sampleWebApp, healthCheckPath: "/health" },
+      config: sampleConfig,
+    });
+    expect(custom).toContain('path = "/health"');
+    expect(custom).not.toContain('path = "/"');
+  });
 });

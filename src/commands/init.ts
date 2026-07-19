@@ -3,7 +3,11 @@ import { ensureAuth } from "../auth.js";
 import type { DeploykitConfig, EnvironmentKind, Trigger } from "../config.js";
 import { firstDeploy, flyUrl } from "../deploy.js";
 import { detect } from "../detect.js";
-import { planFiles, writeFiles } from "../generate/index.js";
+import {
+  type GeneratedFile,
+  planFiles,
+  writeFiles,
+} from "../generate/index.js";
 import {
   flyAppNames,
   mergeSecretTargets,
@@ -159,7 +163,11 @@ export async function runInit(opts: InitOptions) {
   // ── Open PR ──
   if (opts.pr) {
     phases.begin("Open PR");
-    await maybeOpenPr({ opts, written, ghReady });
+    await maybeOpenPr({
+      opts,
+      files: files.filter((f) => written.includes(f.path)),
+      ghReady,
+    });
   }
 
   p.note(renderDestinations(config), "Destinations");
@@ -641,18 +649,18 @@ async function provisionSecrets({
 
 async function maybeOpenPr({
   opts,
-  written,
+  files,
   ghReady,
 }: {
   opts: InitOptions;
-  written: string[];
+  files: GeneratedFile[];
   ghReady: boolean;
 }) {
   if (!ghReady) {
     p.log.warn("Skipping PR — `gh` is not authenticated.");
     return;
   }
-  if (written.length === 0) {
+  if (files.length === 0) {
     p.log.warn("Skipping PR — no files were written.");
     return;
   }
@@ -661,7 +669,7 @@ async function maybeOpenPr({
 
   const s = p.spinner();
   s.start("Opening pull request");
-  const res = await openPr({ cwd: opts.cwd, paths: written });
+  const res = await openPr({ cwd: opts.cwd, files });
   s.stop(
     res.ok
       ? pc.green(`PR opened: ${res.url}`)
