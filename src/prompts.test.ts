@@ -51,6 +51,7 @@ const baseOpts: InitOptions = {
   yes: true,
   dryRun: false,
   provision: false,
+  deploy: false,
   pr: false,
   force: false,
   cwd: tree.root,

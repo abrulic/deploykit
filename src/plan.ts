@@ -172,9 +172,9 @@ export interface SecretTarget {
 export function secretTargets(config: DeploykitConfig): SecretTarget[] {
   const kinds = new Set<EnvironmentKind>();
   for (const app of Object.values(config.apps)) {
-    for (const kind of Object.keys(app.environments) as EnvironmentKind[]) {
-      kinds.add(kind);
-    }
+    if (app.environments.preview) kinds.add("preview");
+    if (app.environments.staging) kinds.add("staging");
+    if (app.environments.production) kinds.add("production");
   }
   const targets: SecretTarget[] = [];
   if (kinds.has("preview"))

@@ -17,9 +17,9 @@ function readOwnPackageJson(): OwnPackageJson {
   let dir = dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 5; i++) {
     try {
-      const pkg = JSON.parse(
+      const pkg: Partial<OwnPackageJson> = JSON.parse(
         readFileSync(join(dir, "package.json"), "utf8"),
-      ) as Partial<OwnPackageJson>;
+      );
       if (pkg.name && pkg.version)
         return { name: pkg.name, version: pkg.version };
     } catch {

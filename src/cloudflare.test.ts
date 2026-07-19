@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  cloudflareTokenSetupUrl,
   deployManagedWaf,
   findDnsRecord,
   getZone,
@@ -7,6 +8,7 @@ import {
   setStaticAssetCacheRule,
   setZoneSetting,
   upsertDnsRecord,
+  verifyToken,
 } from "./cloudflare.js";
 
 /** Build a fake fetch that returns the given Cloudflare envelope + HTTP status. */
@@ -375,5 +377,52 @@ describe("cloudflare client", () => {
       vi.stubGlobal("fetch", fetchSpy);
       expect(await listCloudflareZones({ token: TOKEN })).toBeNull();
     });
+  });
+
+  describe("verifyToken", () => {
+    it("is ok when Cloudflare reports the token active", async () => {
+      fetchSpy = mockFetch((url) => {
+        expect(url).toContain("/user/tokens/verify");
+        return { body: ok({ id: "t1", status: "active" }) };
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+      const res = await verifyToken({ token: TOKEN });
+      expect(res.ok).toBe(true);
+      expect(res.result?.status).toBe("active");
+    });
+
+    it("is not ok when the token is invalid", async () => {
+      fetchSpy = mockFetch(() => ({
+        status: 401,
+        body: {
+          success: false,
+          errors: [{ code: 1000, message: "Invalid API Token" }],
+          result: null,
+        },
+      }));
+      vi.stubGlobal("fetch", fetchSpy);
+      const res = await verifyToken({ token: TOKEN });
+      expect(res.ok).toBe(false);
+      expect(res.detail).toContain("Invalid API Token");
+    });
+  });
+});
+
+describe("cloudflareTokenSetupUrl", () => {
+  it("builds a token-template link with the DNS-edit and zone-read scopes pre-filled", () => {
+    const url = cloudflareTokenSetupUrl();
+    expect(url).toContain("https://dash.cloudflare.com/profile/api-tokens");
+    // Decode the permissionGroupKeys param and assert the core scopes are present.
+    const keys = new URL(url).searchParams.get("permissionGroupKeys");
+    expect(keys).not.toBeNull();
+    const perms = JSON.parse(keys!) as { key: string; type: string }[];
+    expect(perms).toContainEqual({ key: "dns", type: "edit" });
+    expect(perms).toContainEqual({ key: "zone", type: "read" });
+    expect(new URL(url).searchParams.get("name")).toBe("deploykit");
+  });
+
+  it("uses the given token name", () => {
+    const url = cloudflareTokenSetupUrl("my-token");
+    expect(new URL(url).searchParams.get("name")).toBe("my-token");
   });
 });

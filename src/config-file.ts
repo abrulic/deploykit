@@ -51,18 +51,24 @@ export function loadConfigFile(cwd: string): LoadConfigResult {
     };
   }
 
-  const config = parsed as DeploykitConfig;
-  if (
-    typeof config !== "object" ||
-    config === null ||
-    !config.tool ||
-    !config.packageManager ||
-    typeof config.apps !== "object" ||
-    config.apps === null
-  ) {
+  if (!isDeploykitConfig(parsed)) {
     return {
       error: `${CONFIG_FILE} is missing required fields (tool, packageManager, apps).`,
     };
   }
-  return { config };
+  return { config: parsed };
+}
+
+/** Narrow parsed JSON to a config with the required top-level fields present. */
+function isDeploykitConfig(value: unknown): value is DeploykitConfig {
+  if (typeof value !== "object" || value === null) return false;
+  return (
+    "tool" in value &&
+    Boolean(value.tool) &&
+    "packageManager" in value &&
+    Boolean(value.packageManager) &&
+    "apps" in value &&
+    typeof value.apps === "object" &&
+    value.apps !== null
+  );
 }
