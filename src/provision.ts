@@ -108,7 +108,7 @@ function appCreateDetail({
 }
 
 /** A user-facing DNS record that points a custom hostname at the Fly app. */
-export interface FlyCertRecord {
+interface FlyCertRecord {
   type: "CNAME" | "A" | "AAAA";
   /** The custom hostname the record is for. */
   name: string;

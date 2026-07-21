@@ -1,8 +1,8 @@
 # Review Instructions
 
 Guidance for Claude when reviewing PRs in **deploykit** — a TypeScript CLI that
-generates CI/CD (Dockerfiles + GitHub Actions workflows) for Turbo monorepos
-deploying to Fly.io. ESM, pnpm, Biome, Vitest, tsup.
+generates CI/CD (Dockerfiles + GitHub Actions workflows) for Turbo and Nx
+monorepos deploying to Fly.io. ESM, pnpm, Biome, Vitest, tsup.
 
 ## Severity
 

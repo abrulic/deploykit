@@ -4,10 +4,18 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "Automate CI/CD for Turbo monorepos deploying to Fly.io — detect apps, generate Dockerfiles/workflows, wire up per-environment deploys.",
+  "description": "Automate CI/CD for Turbo & Nx monorepos deploying to Fly.io — detect apps, generate Dockerfiles/workflows, wire up per-environment deploys.",
   "type": "module",
   "bin": {
     "deploykit": "dist/index.js"
+  },
+  "types": "./dist/config.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/config.d.ts",
+      "default": "./dist/config.js"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist"

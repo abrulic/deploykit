@@ -56,13 +56,3 @@ export function destinationsForApp({
   }
   return out;
 }
-
-/**
- * Every environment of every app — the shared model behind the end-of-run
- * terminal map and the generated `DEPLOYMENTS.md`, so the two can't disagree.
- */
-export function destinations(config: DeploykitConfig): Destination[] {
-  return Object.keys(config.apps).flatMap((app) =>
-    destinationsForApp({ app, config }),
-  );
-}

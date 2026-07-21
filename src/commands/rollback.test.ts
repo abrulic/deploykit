@@ -169,6 +169,45 @@ describe("runRollback", () => {
     }
   });
 
+  it("rolls back the environment picked at the prompt", async () => {
+    const { root, cleanup } = repoWithConfig();
+    try {
+      // `web` has staging + production, so the env is asked for first, then
+      // the release.
+      const answers = ["staging", "40"];
+      const { deps, calls } = fakeDeps({
+        select: async () => answers.shift() ?? null,
+      });
+      const code = await runRollback(baseOpts(root, { app: "web" }), deps);
+      expect(code).toBe(0);
+      expect(calls.deploy).toEqual([
+        "deploy",
+        "--app",
+        "web-staging",
+        "--image",
+        "img:40",
+        "--config",
+        "apps/web/fly.toml",
+      ]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("ignores an environment that wasn't among the offered options", async () => {
+    const { root, cleanup } = repoWithConfig();
+    try {
+      // Previews aren't rollbackable, so a "preview" answer must not be taken
+      // at face value just because it looks like an EnvironmentKind.
+      const { deps, calls } = fakeDeps({ select: async () => "preview" });
+      const code = await runRollback(baseOpts(root, { app: "web" }), deps);
+      expect(code).toBe(1);
+      expect(calls.deploy).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
+
   it("rejects an unknown app", async () => {
     const { root, cleanup } = repoWithConfig();
     try {

@@ -9,7 +9,7 @@ import type { CloudflareConfig, MinTlsVersion } from "./config.js";
 
 const API = "https://api.cloudflare.com/client/v4";
 
-export interface CfError {
+interface CfError {
   code: number;
   message: string;
 }

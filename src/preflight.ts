@@ -2,26 +2,13 @@ import { join } from "node:path";
 import { commandExists, exec } from "./util/exec.js";
 import { fileExists } from "./util/fsx.js";
 
-export interface PreflightResult {
-  ok: boolean;
-  /** Fatal problems that stop the run. */
-  errors: string[];
-  /** Non-fatal problems worth surfacing. */
-  warnings: string[];
-  /** Whether `gh` is authenticated (needed for --pr / --provision). */
-  ghReady: boolean;
-  /** Whether `flyctl` is authenticated (needed for --provision). */
-  flyReady: boolean;
-  /** Whether a CLOUDFLARE_API_TOKEN is present (needed for custom-domain wiring). */
-  cfReady: boolean;
-}
-
 /**
  * Phase 0 — fail fast before we ask the user anything.
  *
  * Hard requirements: a git repo containing a Turbo (or Nx) monorepo.
- * Soft requirements: gh + flyctl auth, only needed if the user later opts into
- * provisioning or opening a PR.
+ * Soft requirements: gh + flyctl auth (`ghReady` / `flyReady`), only needed if
+ * the user later opts into provisioning or opening a PR, and a Cloudflare token
+ * (`cfReady`), only needed for custom-domain wiring.
  */
 export async function preflight(cwd: string) {
   const errors: string[] = [];

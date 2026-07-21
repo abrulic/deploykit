@@ -28,7 +28,7 @@ export interface GeneratedFile {
 }
 
 /** True for a file that exists on disk, whether or not it matches. */
-export const fileOnDisk = (f: GeneratedFile) => f.status !== "new";
+const fileOnDisk = (f: GeneratedFile) => f.status !== "new";
 
 /**
  * Classify generated content against what's on disk. Line endings and trailing
@@ -68,11 +68,6 @@ export function planFiles({
   }
 
   return files;
-}
-
-export interface WriteResult {
-  written: string[];
-  skipped: string[];
 }
 
 /**

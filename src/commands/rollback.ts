@@ -263,12 +263,15 @@ async function resolveTarget({
   let env = opts.env;
   if (!env) {
     if (available.length === 1) env = available[0];
-    else if (!opts.yes)
-      env =
-        ((await deps.select(
-          "Which environment?",
-          available.map((e) => ({ value: e, label: e })),
-        )) as EnvironmentKind | null) ?? undefined;
+    else if (!opts.yes) {
+      // The seam hands back a plain string; match it against what we offered
+      // rather than trusting it, which narrows it without an assertion.
+      const picked = await deps.select(
+        "Which environment?",
+        available.map((e) => ({ value: e, label: e })),
+      );
+      env = available.find((e) => e === picked);
+    }
   }
   if (!env || !available.includes(env)) {
     return {

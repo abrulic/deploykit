@@ -49,7 +49,7 @@ export default defineConfig({
     }
   });
 
-  it("errors on non-JSON expressions instead of guessing", () => {
+  it("errors on expressions instead of guessing", () => {
     const tree = writeTree({
       files: {
         [CONFIG_FILE]: `import { defineConfig } from "x";
@@ -59,7 +59,46 @@ export default defineConfig({ tool: "turbo", provider: { region } });
       },
     });
     try {
-      expect(loadConfigFile(tree.root).error).toContain("JSON-style");
+      const { error } = loadConfigFile(tree.root);
+      expect(error).toContain("no variables");
+      expect(error).toContain(CONFIG_FILE);
+    } finally {
+      tree.cleanup();
+    }
+  });
+
+  it("reads a config a formatter rewrote (bare keys, single quotes)", () => {
+    // What Biome/Prettier leave behind in the user's repo after a commit hook
+    // runs over the file deploykit generated — it must still load.
+    const formatted = `import { defineConfig } from '@alminabrulic/deploykit';
+
+export default defineConfig({
+  tool: 'turbo',
+  packageManager: 'pnpm',
+  nodeVersion: '20',
+  provider: { type: 'fly', org: 'acme', region: 'iad' },
+  apps: {
+    web: {
+      root: 'apps/web',
+      packageName: '@acme/web',
+      framework: 'next',
+      port: 3000,
+      internalDeps: [],
+      watchPaths: ['apps/web/**'],
+      environments: { staging: { name: 'web-staging', trigger: 'push:main' } },
+      secrets: ['DATABASE_URL'],
+    },
+  },
+});
+`;
+    const tree = writeTree({ files: { [CONFIG_FILE]: formatted } });
+    try {
+      const res = loadConfigFile(tree.root);
+      expect(res.error).toBeUndefined();
+      expect(res.config?.apps.web?.environments.staging?.name).toBe(
+        "web-staging",
+      );
+      expect(res.config?.apps.web?.secrets).toEqual(["DATABASE_URL"]);
     } finally {
       tree.cleanup();
     }

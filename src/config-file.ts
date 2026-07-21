@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import type { DeploykitConfig } from "./config.js";
+import { parseObjectLiteral } from "./config-literal.js";
 import { readText } from "./util/fsx.js";
 
 /** Workspace-relative path of the config file `init` writes and `generate` reads. */
@@ -13,12 +14,12 @@ export type LoadConfigResult =
  * Load `deploykit.config.ts` so `deploykit generate` can regenerate every
  * output from it — this is what makes the config an actual source of truth.
  *
- * The file is TS for editor types, but its payload is a JSON object literal
- * (that's what `init` emits). We extract the `defineConfig(...)` argument and
- * parse it, tolerating the light edits people make by hand: `//` line
- * comments, block comments, and trailing commas. Anything beyond that (spread,
- * identifiers, template strings) fails with a clear message rather than
- * guessing.
+ * The file is TS for editor types, but its payload is an object literal (that's
+ * what `init` emits). We locate the `defineConfig(...)` call and read its
+ * argument as data — never executing the file. `parseObjectLiteral` accepts the
+ * whole hand-edited/formatter-rewritten range: quoted or bare keys, either
+ * quote style, comments, trailing commas. Anything needing evaluation (a
+ * variable, spread, or call) fails with a message naming the line.
  */
 export function loadConfigFile(cwd: string): LoadConfigResult {
   const text = readText(join(cwd, CONFIG_FILE));
@@ -28,26 +29,22 @@ export function loadConfigFile(cwd: string): LoadConfigResult {
     };
   }
 
-  const m = text.match(/defineConfig\s*\(([\s\S]*)\)/);
-  if (!m?.[1]) {
+  const call = /defineConfig\s*\(/.exec(text);
+  if (!call) {
     return {
       error: `couldn't find a defineConfig(...) call in ${CONFIG_FILE}.`,
     };
   }
 
-  const cleaned = m[1]
-    .replace(/\/\*[\s\S]*?\*\//g, "") // block comments
-    .replace(/^\s*\/\/.*$/gm, "") // whole-line comments (values with // stay intact)
-    .replace(/,\s*([}\]])/g, "$1"); // trailing commas
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch {
+  const { value: parsed, error } = parseObjectLiteral({
+    source: text,
+    from: call.index + call[0].length,
+  });
+  if (error !== undefined) {
     return {
       error:
-        `couldn't parse the object passed to defineConfig in ${CONFIG_FILE} — ` +
-        "keep it JSON-style (double-quoted keys and strings, no expressions).",
+        `couldn't read the object passed to defineConfig in ${CONFIG_FILE}: ${error}. ` +
+        "It holds plain data only — no variables, imports or expressions.",
     };
   }
 

@@ -32,7 +32,7 @@ From the repo root:
 
 ```bash
 # Point deploykit at this directory (which already has the config) and re-emit:
-pnpm dev -- generate --cwd examples --force
+pnpm dev generate --cwd examples --yes
 ```
 
 See the main [README](../README.md) for what each piece does and how to configure it.

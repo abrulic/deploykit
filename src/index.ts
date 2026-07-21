@@ -6,7 +6,7 @@ import type { InitOptions } from "./prompts.js";
 import { log, pc } from "./util/log.js";
 import { PKG } from "./util/pkg.js";
 
-const HELP = `${pc.bold("deploykit")} — automate CI/CD for Turbo monorepos on Fly.io
+const HELP = `${pc.bold("deploykit")} — automate CI/CD for Turbo & Nx monorepos on Fly.io
 
 ${pc.bold("Usage")}
   deploykit init [options]      Detect the monorepo and set everything up
@@ -167,7 +167,9 @@ function parseArgs(argv: string[]) {
         const kind = args[++i];
         if (!kind)
           return { command, opts, help, version, error: "--env needs a value" };
-        if (!ENV_KINDS.some((k) => k === kind))
+        // `find` (not `some`) so the match itself carries the narrowed type.
+        const match = ENV_KINDS.find((k) => k === kind);
+        if (!match)
           return {
             command,
             opts,
@@ -175,7 +177,7 @@ function parseArgs(argv: string[]) {
             version,
             error: `--env: unknown environment ${kind} (valid: ${ENV_KINDS.join(", ")})`,
           };
-        opts.env = kind as (typeof ENV_KINDS)[number];
+        opts.env = match;
         break;
       }
       case "--to":

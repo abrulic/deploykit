@@ -65,7 +65,7 @@ export interface DetectedApp {
   hasFlyToml: boolean;
 }
 
-export interface DetectedLib {
+interface DetectedLib {
   name: string;
   root: string;
   packageName: string;
@@ -740,7 +740,7 @@ const BUILD_ENV_PREFIXES = ["NEXT_PUBLIC_", "VITE_", "PUBLIC_", "REACT_APP_"];
  * a server app bakes only the client-exposed prefixes and reads the rest at
  * runtime via Fly secrets.
  */
-export function splitEnvVars(
+function splitEnvVars(
   names: string[],
   serve: ServeModel,
 ): { secrets: string[]; buildEnv: string[] } {

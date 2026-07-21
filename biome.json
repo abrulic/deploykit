@@ -6,7 +6,12 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!!**/dist", "!!**/.claude"]
+    "includes": [
+      "**",
+      "!!**/dist",
+      "!!**/.claude",
+      "!examples/deploykit.config.ts"
+    ]
   },
   "formatter": {
     "enabled": true,
