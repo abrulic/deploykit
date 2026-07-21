@@ -50,15 +50,15 @@ export default defineConfig({
       buildEnv: ["VITE_API_URL"],
       environments: {
         preview: {
-          name: "web-pr-{pr}",
+          name: "acme-web-pr-{pr}",
           trigger: "pr",
         },
         staging: {
-          name: "web-staging",
+          name: "acme-web-staging",
           trigger: "push:main",
         },
         production: {
-          name: "web-prod",
+          name: "acme-web-prod",
           trigger: "manual",
           hostname: "shop.example.com",
         },
@@ -76,11 +76,11 @@ export default defineConfig({
       secrets: [],
       environments: {
         preview: {
-          name: "marketing-pr-{pr}",
+          name: "acme-marketing-pr-{pr}",
           trigger: "pr",
         },
         staging: {
-          name: "marketing-staging",
+          name: "acme-marketing-staging",
           trigger: "push:main",
         },
       },
