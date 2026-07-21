@@ -2,10 +2,12 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { DeploykitConfig } from "../config.js";
 import { readText } from "../util/fsx.js";
+import { readGithubRepo } from "../util/git.js";
 import { generateConfigFile } from "./configfile.js";
 import { generateDockerfile } from "./dockerfile.js";
 import { generateDockerignore } from "./dockerignore.js";
 import { generateFlyToml } from "./flytoml.js";
+import { generateSummary } from "./summary.js";
 import { generateWorkflow } from "./workflow.js";
 
 /**
@@ -58,6 +60,7 @@ export function planFiles({
   add("deploykit.config.ts", generateConfigFile(config));
   add(".dockerignore", generateDockerignore());
   add(".github/workflows/deploy.yml", generateWorkflow(config));
+  add("DEPLOYMENTS.md", generateSummary({ config, repo: readGithubRepo(cwd) }));
 
   for (const [name, app] of Object.entries(config.apps)) {
     add(`${app.root}/Dockerfile`, generateDockerfile({ name, app, config }));

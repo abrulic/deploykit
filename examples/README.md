@@ -24,6 +24,7 @@ A **Turbo** monorepo (`pnpm`, Node 20) with the Fly app-name prefix `acme`, a pr
 | [`apps/web/fly.toml`](apps/web/fly.toml) | Health check + the **commented-out** Prisma migration hook. |
 | [`apps/marketing/Dockerfile`](apps/marketing/Dockerfile) | Static build served with `serve`. |
 | [`apps/marketing/fly.toml`](apps/marketing/fly.toml) | Health check (no migration hook — no Prisma). |
+| [`DEPLOYMENTS.md`](DEPLOYMENTS.md) | The map of what was created: every environment's URL and Fly app, a mermaid view of the pipeline, deep links into the Fly/Cloudflare/GitHub consoles, and the secret names (never values). Generated here without a GitHub remote, so the GitHub link rows are omitted — in your repo they're filled in from `origin`. |
 
 ## Regenerate them yourself
 

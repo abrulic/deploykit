@@ -33,6 +33,16 @@ describe("planFiles classification", () => {
     expect(files.every((f) => f.status === "new")).toBe(true);
   });
 
+  it("plans a DEPLOYMENTS.md alongside the generated files", () => {
+    const root = emptyRepo();
+    const summary = planFiles({ config: sampleConfig, cwd: root }).find(
+      (f) => f.path === "DEPLOYMENTS.md",
+    );
+    // Written from the repo's own remote, so an empty temp dir gets no GitHub
+    // links — the file is still generated.
+    expect(summary?.contents).toContain("## web");
+  });
+
   it("marks a byte-for-byte match identical", () => {
     const root = emptyRepo();
     const planned = planFiles({ config: sampleConfig, cwd: root });

@@ -134,7 +134,11 @@ deploykit.config.ts             source of truth — every other file regenerates
 .github/workflows/deploy.yml    changes → preview / teardown / staging / production jobs
 apps/<app>/Dockerfile           multi-stage, turbo-prune (or nx build) based
 apps/<app>/fly.toml             per-app Fly config with a health check
+DEPLOYMENTS.md                  the map: every URL, plus deep links into Fly /
+                                Cloudflare / GitHub — see below
 ```
+
+`DEPLOYMENTS.md` is written for the teammate who didn't run `deploykit init`: a table of every app environment (URL, Fly app, what deploys it), a mermaid diagram of the pipeline, and a link straight to each Fly app's logs, Cloudflare's DNS page for your zone, and the GitHub environments/secrets screens — so nothing has to be hunted down console by console. It lists secret **names** and where they're wired, never values, which is why it's a committed file rather than a gitignored one. See [`examples/DEPLOYMENTS.md`](examples/DEPLOYMENTS.md) for a real one.
 
 > **See it for real:** the [`examples/`](examples/) directory contains the **actual, byte-for-byte output** deploykit produces for a two-app Turbo monorepo (a React Router SSR `web` app with Prisma + a custom domain + multi-region, and a static Astro `marketing` app). Every file there is generated from a single [`examples/deploykit.config.ts`](examples/deploykit.config.ts).
 

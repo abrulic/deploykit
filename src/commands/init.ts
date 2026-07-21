@@ -1,7 +1,8 @@
 import * as p from "@clack/prompts";
 import { ensureAuth } from "../auth.js";
-import type { DeploykitConfig, EnvironmentKind, Trigger } from "../config.js";
-import { firstDeploy, flyUrl } from "../deploy.js";
+import type { DeploykitConfig } from "../config.js";
+import { firstDeploy } from "../deploy.js";
+import { destinationsForApp, TRIGGER_LABEL } from "../destinations.js";
 import { detect } from "../detect.js";
 import {
   type GeneratedFile,
@@ -744,38 +745,13 @@ async function confirm({
  * on "here's your destination", not a generic checklist.
  */
 export function renderDestinations(config: DeploykitConfig): string {
-  const order: EnvironmentKind[] = ["preview", "staging", "production"];
-  const triggerLabel: Record<Trigger, string> = {
-    pr: "on every pull request",
-    "push:main": "on merge to main",
-    manual: "manual approval",
-  };
-
-  interface Row {
-    env: string;
-    url: string;
-    fly: string;
-    meta: string;
-  }
-  const blocks: { app: string; rows: Row[] }[] = [];
-  for (const [app, cfg] of Object.entries(config.apps)) {
-    const rows: Row[] = [];
-    for (const kind of order) {
-      const env = cfg.environments[kind];
-      if (!env) continue;
-      rows.push({
-        env: kind,
-        url: env.hostname ? `https://${env.hostname}` : flyUrl(env.name),
-        fly: env.name,
-        meta: triggerLabel[env.trigger],
-      });
-    }
-    if (rows.length) blocks.push({ app, rows });
-  }
+  const blocks = Object.keys(config.apps)
+    .map((app) => ({ app, rows: destinationsForApp({ app, config }) }))
+    .filter((b) => b.rows.length > 0);
   if (blocks.length === 0) return pc.dim("No environments configured.");
 
   const allRows = blocks.flatMap((b) => b.rows);
-  const envW = Math.max(...allRows.map((r) => r.env.length));
+  const envW = Math.max(...allRows.map((r) => r.kind.length));
   const urlW = Math.max(...allRows.map((r) => r.url.length));
 
   const lines: string[] = [];
@@ -785,8 +761,9 @@ export function renderDestinations(config: DeploykitConfig): string {
     for (const r of b.rows) {
       // Pad the raw text, then colour — colouring first would let ANSI codes
       // inflate the measured width and break column alignment.
+      const meta = `${TRIGGER_LABEL[r.trigger]} · fly: ${r.flyApp}`;
       lines.push(
-        `  ${r.env.padEnd(envW)}  ${pc.cyan(r.url.padEnd(urlW))}  ${pc.dim(`${r.meta} · fly: ${r.fly}`)}`,
+        `  ${r.kind.padEnd(envW)}  ${pc.cyan(r.url.padEnd(urlW))}  ${pc.dim(meta)}`,
       );
     }
   });

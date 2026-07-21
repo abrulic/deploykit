@@ -1,5 +1,6 @@
 import * as p from "@clack/prompts";
 import { type DeploykitConfig, extraRegions } from "./config.js";
+import { flyUrl } from "./destinations.js";
 import { exec, execInteractive } from "./util/exec.js";
 import { pc } from "./util/log.js";
 
@@ -91,7 +92,7 @@ export function deployArgs(target: DeployTarget): string[] {
 }
 
 /** The public URL a freshly deployed staging app answers on (always valid immediately). */
-export const flyUrl = (flyApp: string) => `https://${flyApp}.fly.dev`;
+export { flyUrl };
 
 /** Injected IO seams, so the orchestration is testable without a real deploy. */
 export interface DeployDeps {
