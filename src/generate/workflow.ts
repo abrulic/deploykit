@@ -158,7 +158,11 @@ function teardownJob({
         env:
           FLY_API_TOKEN: ${gh("secrets.FLY_API_TOKEN")}
         run: |
-          flyctl apps destroy "${prefix}${gh("matrix.app")}-pr-${gh("github.event.number")}" --yes || true
+          FLY_APP="${prefix}${gh("matrix.app")}-pr-${gh("github.event.number")}"
+          # Never fail the job — the PR is already closed and there's nothing to
+          # retry — but don't destroy silently either: a swallowed auth error
+          # leaves the preview machines running, and billing, unnoticed.
+          flyctl apps destroy "$FLY_APP" --yes || echo "::warning::could not destroy $FLY_APP — it may still be running (check FLY_API_TOKEN and the Fly dashboard)"
 `;
 }
 
@@ -264,6 +268,7 @@ ${guard}        env:
           FLY_API_TOKEN: ${gh("secrets.FLY_API_TOKEN")}
 ${secretEnvLines}        run: |
           set -euo pipefail
+${authPreflight({ indent: 10 })}
           APP="${gh("matrix.app")}"
           FLY_APP=${flyAppExpr}
           echo "Deploying $APP -> $FLY_APP"
@@ -276,6 +281,27 @@ ${rootAndSecretsCase({ config, indent: 10 })}
             --app "$FLY_APP" \\
             --remote-only${haFlag} \${BUILD_ARGS[@]+"\${BUILD_ARGS[@]}"}${scaleBlock}
 `;
+}
+
+/**
+ * Fail the job early, with an actionable message, when `FLY_API_TOKEN` isn't a
+ * working credential.
+ *
+ * Without this, a bad token surfaces from the `flyctl apps create` fallback
+ * below as a raw GraphQL error about `organizations` — which reads like an org
+ * misconfiguration, not an auth one. That fallback also swallows stderr from
+ * `flyctl status` (it can't otherwise tell "app doesn't exist" from any other
+ * failure), so the real cause is discarded before anyone sees it. One cheap
+ * call up front keeps the diagnosis one line long.
+ */
+function authPreflight({ indent }: { indent: number }) {
+  const pad = " ".repeat(indent);
+  return [
+    `${pad}if ! flyctl auth whoami >/dev/null 2>&1; then`,
+    `${pad}  echo "::error::FLY_API_TOKEN is missing, invalid, or expired. Create an org-scoped token with: flyctl tokens create org --org $FLY_ORG"`,
+    `${pad}  exit 1`,
+    `${pad}fi`,
+  ].join("\n");
 }
 
 /**

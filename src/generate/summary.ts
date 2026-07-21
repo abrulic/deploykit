@@ -1,7 +1,6 @@
 import type { DeploykitConfig, EnvironmentKind } from "../config.js";
 import {
   type Destination,
-  destinations,
   destinationsForApp,
   ENV_ORDER,
   TRIGGER_LABEL,
@@ -100,28 +99,46 @@ function appSection({
   const lines = [
     `## ${app}${source}`,
     "",
-    "| Environment | URL | Fly app | Deploys |",
-    "| --- | --- | --- | --- |",
+    "| Environment | URL | Fly app | Deploys | Dashboards |",
+    "| --- | --- | --- | --- | --- |",
   ];
   for (const d of rows) {
     lines.push(
-      `| ${d.kind} | ${linkOrCode(d)} | \`${d.flyApp}\` | ${TRIGGER_LABEL[d.trigger]} |`,
+      `| ${d.kind} | ${linkOrCode(d)} | \`${d.flyApp}\` | ${TRIGGER_LABEL[d.trigger]} | ${flyLinks(d)} |`,
     );
   }
   return lines.join("\n");
 }
+
+/** True for a preview environment, whose Fly app name is per-PR, not fixed. */
+const isPreview = (d: Destination) => d.flyApp.includes("{pr}");
 
 /**
  * Preview URLs carry a `{pr}` placeholder and aren't clickable, so they render
  * as code; concrete environments render as links.
  */
 function linkOrCode(d: Destination): string {
-  return d.flyApp.includes("{pr}") ? `\`${d.url}\`` : `<${d.url}>`;
+  return isPreview(d) ? `\`${d.url}\`` : `<${d.url}>`;
 }
 
 /**
- * The section this file exists for: deep links into every console, so nobody
- * has to hunt an app down org by org.
+ * Fly console links for one environment, alongside the environment itself —
+ * the app is already named in this row, so linking here costs a cell instead of
+ * three more rows repeating the name in a separate table.
+ */
+function flyLinks(d: Destination): string {
+  // A preview app only exists while its PR is open, so there's no durable URL
+  // to link — the "Where to look" table points at the org dashboard instead.
+  if (isPreview(d)) return "created per PR";
+  const base = `https://fly.io/apps/${d.flyApp}`;
+  return `[app](${base}) · [logs](${base}/monitoring) · [secrets](${base}/secrets)`;
+}
+
+/**
+ * Console links, indexed by the question that sends someone looking for them —
+ * "the deploy failed", "the domain is wrong" — rather than by resource. Per-app
+ * Fly links live in the app tables above (see `flyLinks`), so this table holds
+ * only what isn't per-app and stays short however many apps there are.
  */
 function dashboards({
   config,
@@ -131,67 +148,63 @@ function dashboards({
   repo: GithubRepo | null;
 }): string {
   const org = config.provider.org;
-  const rows: [string, string][] = [
-    [
-      "Fly org — every app, billing, deploy tokens",
-      `https://fly.io/dashboard/${org}`,
-    ],
-    [
-      "Fly deploy token (`FLY_API_TOKEN`) — revoke/rotate here",
-      `https://fly.io/dashboard/${org}/tokens`,
-    ],
-  ];
+  const link = (text: string, url: string) => `[${text}](${url})`;
+  const rows: [string, string][] = [];
 
-  // Preview apps are created on the fly by the workflow, so there's no stable
-  // URL to link — only the long-lived environments get per-app rows.
-  for (const d of destinations(config).filter(
-    (x) => !x.flyApp.includes("{pr}"),
-  )) {
+  if (repo) {
     rows.push([
-      `\`${d.flyApp}\` — overview`,
-      `https://fly.io/apps/${d.flyApp}`,
-    ]);
-    rows.push([
-      `\`${d.flyApp}\` — metrics & logs`,
-      `https://fly.io/apps/${d.flyApp}/monitoring`,
-    ]);
-    rows.push([
-      `\`${d.flyApp}\` — runtime secrets`,
-      `https://fly.io/apps/${d.flyApp}/secrets`,
+      "See why a deploy failed",
+      link(
+        "Actions → deploy runs",
+        `${repo.url}/actions/workflows/${WORKFLOW_FILE}`,
+      ),
     ]);
   }
+  if (Object.values(config.apps).some((a) => a.environments.production)) {
+    // The approval gate is a GitHub environment setting, not a Fly one — this is
+    // the row people hunt for after a production deploy sits waiting.
+    rows.push([
+      "Approve a production deploy (or add reviewers)",
+      repo
+        ? link("GitHub environments", `${repo.url}/settings/environments`)
+        : "GitHub → Settings → Environments",
+    ]);
+  }
+  if (repo) {
+    rows.push([
+      "Add or change a secret",
+      link("Repository secrets", `${repo.url}/settings/secrets/actions`),
+    ]);
+  }
+  rows.push([
+    "Rotate `FLY_API_TOKEN`",
+    link("Fly org tokens", `https://fly.io/dashboard/${org}/tokens`),
+  ]);
 
   const zone = config.cloudflare?.zone;
   if (zone) {
     // The `?to=/:account/…` form lets Cloudflare resolve the account id, so the
     // link works without knowing it.
+    const cf = (path: string) =>
+      `https://dash.cloudflare.com/?to=/:account/${zone}/${path}`;
     rows.push([
-      `Cloudflare DNS — ${zone}`,
-      `https://dash.cloudflare.com/?to=/:account/${zone}/dns`,
-    ]);
-    rows.push([
-      `Cloudflare SSL/TLS — ${zone}`,
-      `https://dash.cloudflare.com/?to=/:account/${zone}/ssl-tls`,
+      `Fix DNS or a certificate for ${zone}`,
+      `${link("DNS", cf("dns"))} · ${link("SSL/TLS", cf("ssl-tls"))}`,
     ]);
   }
 
-  if (repo) {
-    rows.push([
-      "GitHub Actions — deploy runs",
-      `${repo.url}/actions/workflows/${WORKFLOW_FILE}`,
-    ]);
-    rows.push([
-      "GitHub environments — approvals & env secrets",
-      `${repo.url}/settings/environments`,
-    ]);
-    rows.push([
-      "GitHub secrets — repository level",
-      `${repo.url}/settings/secrets/actions`,
-    ]);
-  }
+  rows.push([
+    "Find an app not listed above (a live PR preview, say)",
+    link("Fly dashboard", `https://fly.io/dashboard/${org}`),
+  ]);
 
-  const lines = ["## Where to look", "", "| What | Where |", "| --- | --- |"];
-  for (const [what, url] of rows) lines.push(`| ${what} | <${url}> |`);
+  const lines = [
+    "## Where to look",
+    "",
+    "| If you need to… | Go to |",
+    "| --- | --- |",
+  ];
+  for (const [need, where] of rows) lines.push(`| ${need} | ${where} |`);
   if (!repo) {
     lines.push("");
     lines.push(

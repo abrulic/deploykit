@@ -124,11 +124,40 @@ describe("generateWorkflow", () => {
       'FLY_APP="acme-shop-$APP-pr-${{ github.event.number }}"',
     );
     expect(prefixed).toContain(
-      'flyctl apps destroy "acme-shop-${{ matrix.app }}-pr-${{ github.event.number }}"',
+      'FLY_APP="acme-shop-${{ matrix.app }}-pr-${{ github.event.number }}"',
     );
     expect(prefixed).toContain(
       'URL="https://acme-shop-$APP-pr-${{ github.event.number }}.fly.dev"',
     );
+  });
+
+  it("checks Fly auth before every deploy, with an actionable message", () => {
+    // `flyctl apps create` reports a bad token as an opaque GraphQL error about
+    // organizations, and the `flyctl status` fallback swallows stderr — so the
+    // preflight is what makes an expired FLY_API_TOKEN diagnosable.
+    const jobs = yaml.split(/^ {2}(?=\w+:)/m);
+    for (const name of ["preview", "staging", "production"]) {
+      const job = jobs.find((j) => j.startsWith(`${name}:`));
+      expect(job).toContain("flyctl auth whoami");
+      expect(job).toContain("FLY_API_TOKEN is missing, invalid, or expired");
+      expect(job).toContain("flyctl tokens create org --org $FLY_ORG");
+    }
+  });
+
+  it("runs the auth check before anything that needs the token", () => {
+    expect(yaml.indexOf("flyctl auth whoami")).toBeLessThan(
+      yaml.indexOf("flyctl apps create"),
+    );
+  });
+
+  it("warns instead of failing when a preview teardown can't run", () => {
+    // The PR is already closed, so failing the job helps nobody — but a silently
+    // swallowed error leaves preview machines running and billing.
+    const teardown = yaml
+      .split(/^ {2}(?=\w+:)/m)
+      .find((j) => j.startsWith("teardown:"));
+    expect(teardown).toContain("::warning::could not destroy");
+    expect(teardown).not.toContain("|| true");
   });
 
   it("keeps unprefixed names when no namePrefix is configured (old configs)", () => {

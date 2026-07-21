@@ -16,36 +16,27 @@ flowchart LR
 
 ## web — `apps/web`
 
-| Environment | URL | Fly app | Deploys |
-| --- | --- | --- | --- |
-| preview | `https://acme-web-pr-{pr}.fly.dev` | `acme-web-pr-{pr}` | on every pull request |
-| staging | <https://acme-web-staging.fly.dev> | `acme-web-staging` | on merge to main |
-| production | <https://shop.example.com> | `acme-web-prod` | manual approval |
+| Environment | URL | Fly app | Deploys | Dashboards |
+| --- | --- | --- | --- | --- |
+| preview | `https://acme-web-pr-{pr}.fly.dev` | `acme-web-pr-{pr}` | on every pull request | created per PR |
+| staging | <https://acme-web-staging.fly.dev> | `acme-web-staging` | on merge to main | [app](https://fly.io/apps/acme-web-staging) · [logs](https://fly.io/apps/acme-web-staging/monitoring) · [secrets](https://fly.io/apps/acme-web-staging/secrets) |
+| production | <https://shop.example.com> | `acme-web-prod` | manual approval | [app](https://fly.io/apps/acme-web-prod) · [logs](https://fly.io/apps/acme-web-prod/monitoring) · [secrets](https://fly.io/apps/acme-web-prod/secrets) |
 
 ## marketing — `apps/marketing`
 
-| Environment | URL | Fly app | Deploys |
-| --- | --- | --- | --- |
-| preview | `https://acme-marketing-pr-{pr}.fly.dev` | `acme-marketing-pr-{pr}` | on every pull request |
-| staging | <https://acme-marketing-staging.fly.dev> | `acme-marketing-staging` | on merge to main |
+| Environment | URL | Fly app | Deploys | Dashboards |
+| --- | --- | --- | --- | --- |
+| preview | `https://acme-marketing-pr-{pr}.fly.dev` | `acme-marketing-pr-{pr}` | on every pull request | created per PR |
+| staging | <https://acme-marketing-staging.fly.dev> | `acme-marketing-staging` | on merge to main | [app](https://fly.io/apps/acme-marketing-staging) · [logs](https://fly.io/apps/acme-marketing-staging/monitoring) · [secrets](https://fly.io/apps/acme-marketing-staging/secrets) |
 
 ## Where to look
 
-| What | Where |
+| If you need to… | Go to |
 | --- | --- |
-| Fly org — every app, billing, deploy tokens | <https://fly.io/dashboard/acme> |
-| Fly deploy token (`FLY_API_TOKEN`) — revoke/rotate here | <https://fly.io/dashboard/acme/tokens> |
-| `acme-web-staging` — overview | <https://fly.io/apps/acme-web-staging> |
-| `acme-web-staging` — metrics & logs | <https://fly.io/apps/acme-web-staging/monitoring> |
-| `acme-web-staging` — runtime secrets | <https://fly.io/apps/acme-web-staging/secrets> |
-| `acme-web-prod` — overview | <https://fly.io/apps/acme-web-prod> |
-| `acme-web-prod` — metrics & logs | <https://fly.io/apps/acme-web-prod/monitoring> |
-| `acme-web-prod` — runtime secrets | <https://fly.io/apps/acme-web-prod/secrets> |
-| `acme-marketing-staging` — overview | <https://fly.io/apps/acme-marketing-staging> |
-| `acme-marketing-staging` — metrics & logs | <https://fly.io/apps/acme-marketing-staging/monitoring> |
-| `acme-marketing-staging` — runtime secrets | <https://fly.io/apps/acme-marketing-staging/secrets> |
-| Cloudflare DNS — example.com | <https://dash.cloudflare.com/?to=/:account/example.com/dns> |
-| Cloudflare SSL/TLS — example.com | <https://dash.cloudflare.com/?to=/:account/example.com/ssl-tls> |
+| Approve a production deploy (or add reviewers) | GitHub → Settings → Environments |
+| Rotate `FLY_API_TOKEN` | [Fly org tokens](https://fly.io/dashboard/acme/tokens) |
+| Fix DNS or a certificate for example.com | [DNS](https://dash.cloudflare.com/?to=/:account/example.com/dns) · [SSL/TLS](https://dash.cloudflare.com/?to=/:account/example.com/ssl-tls) |
+| Find an app not listed above (a live PR preview, say) | [Fly dashboard](https://fly.io/dashboard/acme) |
 
 _No GitHub remote was found when this file was generated, so the GitHub links are omitted. Re-run `deploykit generate` once the remote is set._
 

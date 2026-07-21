@@ -48,15 +48,40 @@ describe("generateSummary", () => {
     expect(out).not.toContain("manual approval");
   });
 
-  it("deep-links the Fly org, tokens page, and each long-lived app", () => {
-    expect(md).toContain("https://fly.io/dashboard/acme");
-    expect(md).toContain("https://fly.io/dashboard/acme/tokens");
-    expect(md).toContain("https://fly.io/apps/web-staging/monitoring");
-    expect(md).toContain("https://fly.io/apps/web-prod/secrets");
+  it("puts each environment's Fly links in its own row, not a separate table", () => {
+    expect(md).toContain(
+      "[app](https://fly.io/apps/web-staging) · [logs](https://fly.io/apps/web-staging/monitoring) · [secrets](https://fly.io/apps/web-staging/secrets)",
+    );
+    // The old layout repeated the app name across three rows per environment;
+    // "Where to look" must stay free of per-app entries however many apps exist.
+    const whereToLook = md.slice(md.indexOf("## Where to look"));
+    expect(whereToLook).not.toContain("web-staging");
+    expect(whereToLook).not.toContain("web-prod");
   });
 
   it("has no dashboard link for preview apps, which don't exist between PRs", () => {
     expect(md).not.toContain("https://fly.io/apps/web-pr-{pr}");
+    expect(md).toContain("created per PR");
+  });
+
+  it("indexes 'Where to look' by task, and points at the org for stray apps", () => {
+    expect(md).toContain("| If you need to… | Go to |");
+    expect(md).toContain("See why a deploy failed");
+    expect(md).toContain("Rotate `FLY_API_TOKEN`");
+    expect(md).toContain("https://fly.io/dashboard/acme/tokens");
+    // Previews have no durable link of their own, so the org dashboard is where
+    // you go to find one that's currently up.
+    expect(md).toContain("[Fly dashboard](https://fly.io/dashboard/acme)");
+  });
+
+  it("drops the approval row when no app deploys to production", () => {
+    const noProd: DeploykitConfig = {
+      ...sampleConfig,
+      apps: { api: sampleApiApp },
+    };
+    expect(generateSummary({ config: noProd, repo })).not.toContain(
+      "Approve a production deploy",
+    );
   });
 
   it("deep-links GitHub actions, environments and secrets when a remote is known", () => {

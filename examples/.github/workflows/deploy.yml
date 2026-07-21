@@ -73,6 +73,10 @@ jobs:
           SECRET_VITE_API_URL: ${{ secrets.VITE_API_URL }}
         run: |
           set -euo pipefail
+          if ! flyctl auth whoami >/dev/null 2>&1; then
+            echo "::error::FLY_API_TOKEN is missing, invalid, or expired. Create an org-scoped token with: flyctl tokens create org --org $FLY_ORG"
+            exit 1
+          fi
           APP="${{ matrix.app }}"
           FLY_APP="acme-$APP-pr-${{ github.event.number }}"
           echo "Deploying $APP -> $FLY_APP"
@@ -126,7 +130,11 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
-          flyctl apps destroy "acme-${{ matrix.app }}-pr-${{ github.event.number }}" --yes || true
+          FLY_APP="acme-${{ matrix.app }}-pr-${{ github.event.number }}"
+          # Never fail the job — the PR is already closed and there's nothing to
+          # retry — but don't destroy silently either: a swallowed auth error
+          # leaves the preview machines running, and billing, unnoticed.
+          flyctl apps destroy "$FLY_APP" --yes || echo "::warning::could not destroy $FLY_APP — it may still be running (check FLY_API_TOKEN and the Fly dashboard)"
 
   staging:
     needs: changes
@@ -148,6 +156,10 @@ jobs:
           SECRET_VITE_API_URL: ${{ secrets.VITE_API_URL }}
         run: |
           set -euo pipefail
+          if ! flyctl auth whoami >/dev/null 2>&1; then
+            echo "::error::FLY_API_TOKEN is missing, invalid, or expired. Create an org-scoped token with: flyctl tokens create org --org $FLY_ORG"
+            exit 1
+          fi
           APP="${{ matrix.app }}"
           FLY_APP="acme-$APP-staging"
           echo "Deploying $APP -> $FLY_APP"
@@ -194,6 +206,10 @@ jobs:
           SECRET_VITE_API_URL: ${{ secrets.VITE_API_URL }}
         run: |
           set -euo pipefail
+          if ! flyctl auth whoami >/dev/null 2>&1; then
+            echo "::error::FLY_API_TOKEN is missing, invalid, or expired. Create an org-scoped token with: flyctl tokens create org --org $FLY_ORG"
+            exit 1
+          fi
           APP="${{ matrix.app }}"
           FLY_APP="acme-$APP-prod"
           echo "Deploying $APP -> $FLY_APP"
