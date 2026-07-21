@@ -1,0 +1,74 @@
+---
+title: "Custom domains (Cloudflare)"
+summary: "Wire staging/production hostnames through Cloudflare DNS + Fly certs"
+description: "Optionally serve custom domains for staging and production. deploykit issues a Fly certificate and wires the Cloudflare DNS records, with a token that carries the exact zone-read + DNS-edit permissions it needs."
+---
+
+## What this does
+
+By default your apps are reachable on `*.fly.dev`. Opt into custom domains and deploykit will, for each staging/production hostname you provide:
+
+- issue a **Fly certificate** for the hostname, and
+- wire the matching **Cloudflare DNS** record.
+
+Previews always stay on `*.fly.dev` — only staging and production get custom domains.
+
+## During `init`
+
+If you configure staging or production, deploykit asks: **"Wire up custom domains through Cloudflare?"** If you say yes it:
+
+1. Resolves a **Cloudflare API token** (see below).
+2. Lets you pick the **zone** (the registrable domain that owns the hostnames, e.g. `example.com`).
+3. Collects a **hostname per environment** (blank to skip).
+
+If no token is available, deploykit still records the domains in your config and **skips provisioning** until `CLOUDFLARE_API_TOKEN` is set — nothing is left half-done.
+
+## The API token
+
+deploykit needs **Zone read + DNS edit** permissions. It prints a Cloudflare dashboard link with exactly those permissions **pre-selected** — you just confirm and create the token. It's resolved in this order:
+
+1. `CLOUDFLARE_API_TOKEN` environment variable
+2. a saved credentials file (`.deploykit/credentials`)
+3. an interactive, masked prompt
+
+## Config shape
+
+Custom domains add a `cloudflare` block and per-environment `hostname` fields:
+
+```ts
+export default defineConfig({
+  // …
+  apps: {
+    web: {
+      // …
+      environments: {
+        staging: { name: "acme-web-staging", trigger: "push:main", hostname: "staging.example.com" },
+        production: { name: "acme-web-prod", trigger: "manual", hostname: "app.example.com" },
+      },
+    },
+  },
+  cloudflare: {
+    zone: "example.com",
+    proxied: true,
+    ssl: "strict",
+    alwaysUseHttps: true,
+    minTlsVersion: "1.2",
+    security: true,
+    cache: true,
+  },
+})
+```
+
+| Field | Meaning |
+|-------|---------|
+| `zone` | Registrable zone that owns the hostnames. |
+| `proxied` | Route traffic through Cloudflare's proxy (orange cloud) vs DNS-only. |
+| `ssl` | Zone SSL mode: `off` / `flexible` / `full` / `strict`. Use **`strict`** with proxied Fly apps to avoid redirect loops. |
+| `alwaysUseHttps` | Turn on the edge "Always Use HTTPS" redirect. |
+| `minTlsVersion` | Minimum TLS version at the edge (`1.0`–`1.3`). |
+| `security` | Apply a security baseline (security level + bot fight mode, managed WAF best-effort). |
+| `cache` | Add cache rules for static assets (+ browser cache TTL). |
+
+## SSL tip
+
+If your Fly app is **proxied** through Cloudflare, use `ssl: "strict"`. `flexible` terminates TLS at the edge and talks HTTP to Fly, which — combined with Fly's own HTTPS redirect — produces redirect loops.

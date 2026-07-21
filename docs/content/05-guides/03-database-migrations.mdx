@@ -1,0 +1,44 @@
+---
+title: "Database migrations"
+summary: "Why deploykit won't run migrations for you — and the hook it writes instead"
+description: "deploykit does not run database migrations because a bad one causes irreversible data loss. When it detects a Prisma schema it writes a commented-out release_command hook into fly.toml that you opt into."
+---
+
+## Why deploykit doesn't run migrations
+
+A bad migration causes **irreversible data loss**, and owning that decision is out of scope for a code generator. So deploykit will **never run migrations for you** by default.
+
+This is also why **[rollback](/commands/rollback)** is image-only: rolling an app back to an older image does **not** undo a migration a newer release already applied, and an older image may not run against the newer schema.
+
+## The commented-out hook
+
+When deploykit detects a **Prisma** schema in an app, it writes a **commented-out** release hook into that app's `fly.toml`:
+
+```toml
+# [deploy]
+#   release_command = "(cd packages/db && npx prisma migrate deploy --schema ./prisma/schema.prisma)"
+```
+
+Fly runs a `release_command` once per deploy, before the new machines take traffic. deploykit leaves it commented so it's a deliberate, reviewed opt-in.
+
+## Enabling it
+
+If you've decided your migrations are safe to run automatically on deploy:
+
+1. Uncomment the `[deploy]` block in the app's `fly.toml`.
+2. Make sure the command's working directory and schema path match your repo.
+3. Ensure the runtime image can reach the database (the `DATABASE_URL` secret is set).
+
+```toml
+[deploy]
+  release_command = "(cd packages/db && npx prisma migrate deploy --schema ./prisma/schema.prisma)"
+```
+
+## Prisma client generation
+
+Separately from *migrations*, deploykit handles Prisma **client generation** for you. Under pnpm 10 / Prisma 7 the client isn't generated on install, so the Dockerfile runs `prisma generate` before the build for every Prisma package in an app's dependency closure. That's about producing a runnable image — it does **not** touch your database.
+
+## Safer patterns
+
+- **Expand/contract** — deploy schema-additive migrations first, ship code that works with both shapes, then remove old columns in a later release. This keeps old and new images compatible so rollback stays safe.
+- **Gate destructive migrations** behind the production approval gate and run them deliberately, not on every push.

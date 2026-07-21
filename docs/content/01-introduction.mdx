@@ -1,0 +1,44 @@
+---
+title: "Introduction"
+summary: "What deploykit is, who it's for, and the problem it solves"
+description: "deploykit turns a Turbo or Nx monorepo into a fully wired Fly.io deployment pipeline — Dockerfiles, fly.toml files and a GitHub Actions workflow — generated as a reviewable PR you own and can edit."
+---
+
+## The problem
+
+Wiring up CI/CD for a monorepo is repetitive, error-prone work. For each deployable app you need a Dockerfile that prunes the workspace correctly, a `fly.toml`, the right build args and runtime secrets, and a GitHub Actions workflow that only redeploys the apps a change actually touches — across preview, staging and production. Getting the Docker layer caching, the `turbo prune` / Nx graph, and the per-environment triggers right takes hours, and the result rots as the monorepo grows.
+
+## What deploykit does
+
+deploykit reads your workspace and does that wiring for you. One command:
+
+```bash
+npx deploykit init
+```
+
+produces:
+
+- Multi-stage, **`turbo-prune`-based** Dockerfiles (or Nx-graph-based) for each deployable app.
+- A `.dockerignore` per app.
+- A per-app `fly.toml` with an HTTP health check.
+- A single `.github/workflows/deploy.yml` that routes changes to preview / teardown / staging / production.
+- A `deploykit.config.ts` that captures every decision and regenerates all of the above.
+
+Everything is written into your repo as ordinary files. You review them, edit them, and commit them like any other code — there is no proprietary runtime and nothing phones home.
+
+## Who it's for
+
+- Teams running a **Turbo** or **Nx** monorepo.
+- Deploying Node/web apps (Next, Remix, React Router, Astro, Vite SPAs, plain Node servers, or static builds) to **Fly.io**.
+- Using **GitHub Actions** for CI.
+
+## Design principles
+
+- **You own the output.** deploykit generates files, not a black box. Delete deploykit tomorrow and your pipeline keeps working.
+- **Nothing happens without confirmation.** `init` shows a full plan and writes/provisions nothing until you say yes. `--dry-run` prints the plan and stops.
+- **The config is the source of truth.** `deploykit.config.ts` drives every generated artifact; re-run `deploykit generate` any time to rebuild them.
+- **Safe by default.** deploykit will not run database migrations for you (a bad one is irreversible), health-checks every deploy so bad releases roll themselves back, and never writes secret *values* — only their names.
+
+## Next steps
+
+Head to **[Getting Started → Installation](/getting-started/installation)** to check prerequisites and run your first `init`.

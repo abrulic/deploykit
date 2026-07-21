@@ -328,6 +328,19 @@ pnpm lint                     # biome check
 
 The generated config is the source of truth: every Dockerfile, `fly.toml`, and workflow is regenerable from `deploykit.config.ts`. When you change generation logic, add a Vitest test covering the output (generated shell/YAML must stay safe against injection from repo-derived values). See [REVIEW.md](REVIEW.md) for the review guidelines.
 
+## Documentation
+
+Full documentation lives in [`docs/`](docs/) — a self-contained docs site
+(React Router v7 + content-collections, built from the
+[code-forge docs template](https://github.com/code-forge-io/docs)). The content
+is under [`docs/content/`](docs/content/). To run it locally:
+
+```bash
+cd docs
+pnpm install
+pnpm run dev
+```
+
 ## License
 
 deploykit is **source-available** under the [Business Source License 1.1](LICENSE) (`BUSL-1.1`).

@@ -1,0 +1,87 @@
+---
+title: "Config reference"
+summary: "Every field in deploykit.config.ts"
+description: "Complete field-by-field reference for deploykit.config.ts — top-level options, the provider block, per-app config, environments, Prisma targets, and the Cloudflare block."
+---
+
+`deploykit.config.ts` is the source of truth. Import `defineConfig` for editor types:
+
+```ts
+import { defineConfig } from "@alminabrulic/deploykit"
+
+export default defineConfig({ /* … */ })
+```
+
+## Top level
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tool` | `"turbo" \| "nx"` | Monorepo tool. |
+| `packageManager` | `"pnpm" \| "yarn" \| "npm" \| "bun"` | Package manager. |
+| `nodeVersion` | `string` | Node major used in generated Dockerfiles, e.g. `"20"`. |
+| `namePrefix` | `string?` | Prefix for every generated Fly app name. Fly names are **globally unique**, so a prefix (repo/org) avoids collisions. Omitted → no prefix. |
+| `provider` | `ProviderConfig` | Fly provider settings. |
+| `apps` | `Record<string, AppConfig>` | Deployable apps keyed by short name. |
+| `cloudflare` | `CloudflareConfig?` | Optional DNS/CDN wiring for custom domains. |
+| `installEnv` | `Record<string,string>?` | Env used to neutralize `prepare` git-hook installers that fail in the slim image (e.g. `HUSKY=0`). |
+| `nxIntegrated` | `boolean?` | Nx only: `true` = integrated repo (outputs at `dist/<root>`); `false` = package-based. |
+
+## `provider`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | `"fly"` | The provider. |
+| `org` | `string` | Fly organization slug. |
+| `region` | `string` | Primary region, e.g. `"iad"`. |
+| `regions` | `string[]?` | Extra regions to also run in (stateless apps only). See **[Multiple regions](/guides/multiple-regions)**. |
+
+## `apps[name]`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `root` | `string` | Workspace-relative dir, e.g. `apps/web`. |
+| `packageName` | `string` | `name` from the app's `package.json`. |
+| `framework` | `Framework` | `next` / `remix` / `react-router` / `astro` / `vite` / `node-server` / `static`. A detection hint. |
+| `serve` | `"static" \| "server"?` | How the runner serves the app. Omitted → derived from framework. |
+| `startCommand` | `string[]?` | Exec-form CMD for a server app. Omitted → run the app's own `start` script. |
+| `outputDir` | `string?` | Static apps: directory to serve. Omitted → derived. |
+| `spa` | `boolean?` | Static apps: serve with SPA history fallback. |
+| `prisma` | `PrismaTarget[]?` | Prisma packages whose client is generated at build time. |
+| `port` | `number` | Internal container port. |
+| `healthCheckPath` | `string?` | HTTP path Fly polls for health (default `/`). |
+| `internalDeps` | `string[]` | Internal workspace packages this app depends on. |
+| `watchPaths` | `string[]` | Globs that trigger a redeploy (its dir + each dep's dir). |
+| `environments` | `Partial<Record<EnvironmentKind, AppEnvironment>>` | Per-environment config. |
+| `secrets` | `string[]` | **Runtime** env-var names (via `flyctl secrets set`). |
+| `buildEnv` | `string[]?` | **Build-time** var names (via `--build-arg`; client-exposed). |
+
+### `environments[kind]` (`AppEnvironment`)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `string` | Fly app name. Preview uses the `{pr}` placeholder. |
+| `trigger` | `"pr" \| "push:main" \| "manual"` | When this environment deploys. |
+| `hostname` | `string?` | Custom domain (staging/production only). Requires a `cloudflare` block. |
+
+### `prisma[]` (`PrismaTarget`)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `packageName` | `string` | Package name (the `--filter` / run target). |
+| `root` | `string` | Workspace-relative package dir. |
+| `schema` | `string` | Schema path relative to the package root. |
+| `hasConfig` | `boolean` | True when the package has a `prisma.config.{ts,js}` (then `--schema` is omitted). |
+
+## `cloudflare`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `zone` | `string` | Registrable zone owning the hostnames. |
+| `proxied` | `boolean` | Route through Cloudflare's proxy vs DNS-only. |
+| `ssl` | `"off" \| "flexible" \| "full" \| "strict"` | Zone SSL mode. Use `strict` with proxied Fly apps. |
+| `alwaysUseHttps` | `boolean` | Edge "Always Use HTTPS" redirect. |
+| `minTlsVersion` | `"1.0" \| "1.1" \| "1.2" \| "1.3"` | Minimum edge TLS version. |
+| `security` | `boolean` | Apply a security baseline. |
+| `cache` | `boolean` | Add static-asset cache rules. |
+
+See **[Custom domains](/guides/custom-domains-cloudflare)** for the workflow.

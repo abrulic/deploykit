@@ -1,0 +1,43 @@
+---
+title: "deploykit"
+summary: "Automate CI/CD for Turbo and Nx monorepos deploying to Fly.io"
+description: "deploykit reads your workspace graph and generates the Dockerfiles, fly.toml files and GitHub Actions workflow to deploy every app to Fly.io — preview, staging and production — landed as a reviewable PR you own."
+---
+
+## Welcome
+
+**deploykit** automates CI/CD for **Turbo and Nx monorepos** deploying to **Fly.io**.
+
+Run one command in your monorepo and get a reviewable pull request that wires up:
+
+- **PR preview environments** — every pull request gets its own deployed app, with the URL commented on the PR, torn down automatically when the PR closes.
+- **Staging** — deploys on merge to `main`.
+- **Production** — deploys behind a manual approval gate (a GitHub Environment protection rule).
+
+deploykit reads your workspace graph, figures out which apps are deployable, and generates the Dockerfiles, `fly.toml` files and a GitHub Actions workflow — all landed as **files you own and can edit**.
+
+## Try it now
+
+```bash
+npx deploykit init
+```
+
+That's it. `init` walks through five phases — preflight, detect, ask, plan, emit — and never writes or provisions anything until you confirm the plan.
+
+## What makes it different
+
+- 🧭 **Detection-driven** — reads your package manager, workspace packages, per-app framework, ports, internal dependencies, Prisma schemas and env-var names. Every question is pre-filled from what it found.
+- 📦 **Files you own** — multi-stage, `turbo-prune`-based Dockerfiles, per-app `fly.toml`, a single `deploy.yml` workflow, and a `deploykit.config.ts` that is the source of truth for every decision. No hidden runtime, no vendor lock-in.
+- 🚦 **Three environments** — preview, staging and production, each with the right trigger and the right guardrails.
+- 🛟 **Health-checked, self-rolling-back deploys** — Fly waits on an HTTP health check before shifting traffic and keeps the old machines running if it fails, so a bad deploy rolls itself back.
+- ⏪ **One-command rollback** — `deploykit rollback` redeploys a prior image for an environment, after showing you the exact `flyctl` command it will run.
+- 🌍 **Multi-region** — scale stateless apps into extra Fly regions after each deploy.
+- 🗄️ **Migration-aware** — detects Prisma schemas and writes a commented-out release hook you opt into, rather than running destructive migrations for you.
+- 🌐 **Custom domains** — optionally wire staging/production hostnames through Cloudflare DNS + Fly certificates.
+
+## Where to next
+
+- New here? Start with **[Getting Started](/getting-started)** — install, run, and read what gets generated.
+- Want the mental model? Read **[Core Concepts](/core-concepts)** — how detection, environments and the config file fit together.
+- Looking for a specific task? Jump to the **[Guides](/guides)** — rollbacks, multi-region, migrations, custom domains, provisioning.
+- Need exact flags and fields? See the **[Reference](/reference)**.

@@ -1,0 +1,76 @@
+---
+title: "The config file"
+summary: "deploykit.config.ts is the source of truth"
+description: "Understand deploykit.config.ts — the typed configuration file that captures every deployment decision and regenerates all Dockerfiles, fly.toml files and workflows."
+---
+
+## The single source of truth
+
+`deploykit.config.ts` captures every decision deploykit made, in a typed, hand-editable file that lives in your repo. Every generated artifact is a pure function of it — edit the config and run **[`deploykit generate`](/commands/generate)** to rebuild everything.
+
+```ts
+import { defineConfig } from "@alminabrulic/deploykit"
+
+export default defineConfig({
+  tool: "turbo",
+  packageManager: "pnpm",
+  nodeVersion: "20",
+  namePrefix: "acme",
+  provider: {
+    type: "fly",
+    org: "my-org",
+    region: "iad",
+  },
+  apps: {
+    web: {
+      root: "apps/web",
+      packageName: "@acme/web",
+      framework: "next",
+      serve: "server",
+      port: 3000,
+      healthCheckPath: "/",
+      internalDeps: ["@acme/ui"],
+      watchPaths: ["apps/web/**", "packages/ui/**"],
+      environments: {
+        preview: { name: "acme-web-pr-{pr}", trigger: "pr" },
+        staging: { name: "acme-web-staging", trigger: "push:main" },
+        production: { name: "acme-web-prod", trigger: "manual" },
+      },
+      secrets: ["DATABASE_URL"],
+      buildEnv: ["NEXT_PUBLIC_API_URL"],
+    },
+  },
+})
+```
+
+## Top-level fields
+
+| Field | Meaning |
+|-------|---------|
+| `tool` | `turbo` or `nx`. |
+| `packageManager` | `pnpm`, `yarn`, `npm` or `bun`. |
+| `nodeVersion` | Node major used in the generated Dockerfiles, e.g. `"20"`. |
+| `namePrefix` | Prefix for every generated Fly app name. Fly app names are **globally unique**, so bare names like `web-staging` are usually taken. |
+| `provider` | The Fly org, primary `region`, and optional extra `regions`. |
+| `apps` | Deployable apps keyed by short name. |
+| `cloudflare` | Optional DNS/CDN wiring for custom domains. |
+
+## Key per-app fields
+
+| Field | Meaning |
+|-------|---------|
+| `root` | Workspace-relative directory, e.g. `apps/web`. |
+| `framework` | Detection hint (drives default port + runner shape). |
+| `serve` | `server` (long-running process) or `static` (serve built files). |
+| `port` | Internal port the container listens on. |
+| `healthCheckPath` | HTTP path Fly polls for release health (default `/`). |
+| `internalDeps` | Internal workspace packages this app depends on. |
+| `watchPaths` | Globs that trigger a redeploy (its dir + each dep's dir). |
+| `environments` | Per-environment Fly app name + trigger (+ optional hostname). |
+| `secrets` | **Runtime** env-var names (wired via `flyctl secrets set`). |
+| `buildEnv` | **Build-time** var names (baked in via `--build-arg`). |
+| `prisma` | Prisma packages whose client is generated at build time. |
+
+The **[Config Reference](/reference/config-reference)** documents every field, including the Cloudflare and Prisma sub-shapes.
+
+> **Tip:** because the config is the source of truth, prefer editing it and running `deploykit generate` over hand-editing a Dockerfile or `fly.toml` — otherwise the next `generate` will overwrite your manual change.

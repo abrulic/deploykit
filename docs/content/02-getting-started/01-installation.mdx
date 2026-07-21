@@ -1,0 +1,58 @@
+---
+title: "Installation"
+summary: "Prerequisites and how to run deploykit"
+description: "What you need before running deploykit — a Turbo or Nx monorepo, git, the GitHub CLI and flyctl — and the two ways to run it (npx or a dev dependency)."
+---
+
+## Prerequisites
+
+deploykit checks these for you in its **preflight** phase, but you'll want them ready:
+
+| Requirement | Why |
+|-------------|-----|
+| A **git** repository | deploykit branches, commits and opens PRs. |
+| A **Turbo** or **Nx** monorepo | It reads your workspace graph to find deployable apps. |
+| **Node.js 20+** | deploykit's runtime. |
+| A supported package manager | **pnpm**, **yarn**, **npm** or **bun** — detected automatically. |
+| [**GitHub CLI** (`gh`)](https://cli.github.com/) | Used to open the PR and set repository secrets / environments. |
+| [**flyctl**](https://fly.io/docs/flyctl/install/) | Used to provision Fly apps and deploy. |
+
+You only need `gh` and `flyctl` if you opt into provisioning, opening a PR, or deploying. A plain `--dry-run` needs neither.
+
+## Running deploykit
+
+You don't have to install anything — run it straight from npm:
+
+```bash
+npx deploykit init
+```
+
+### As a dev dependency (optional)
+
+If you'd rather pin a version and get a repo-local binary:
+
+```bash
+# pnpm
+pnpm add -D @alminabrulic/deploykit
+
+# npm
+npm install -D @alminabrulic/deploykit
+
+# yarn
+yarn add -D @alminabrulic/deploykit
+```
+
+Then run it via your package manager:
+
+```bash
+pnpm deploykit init
+```
+
+## Verify
+
+```bash
+npx deploykit --version
+npx deploykit --help
+```
+
+`--help` lists every command and flag. When you're ready, continue to the **[Quick Start](/getting-started/quick-start)**.

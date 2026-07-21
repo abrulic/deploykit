@@ -1,0 +1,76 @@
+---
+title: "What it generates"
+summary: "The files deploykit writes into your repo"
+description: "A tour of every file deploykit generates — per-app Dockerfiles, .dockerignore, fly.toml, the deploy.yml GitHub Actions workflow, and the deploykit.config.ts source of truth."
+---
+
+## The output
+
+A typical run writes:
+
+```
+apps/<app>/Dockerfile          multi-stage, turbo-prune (or Nx-graph) based
+apps/<app>/.dockerignore
+apps/<app>/fly.toml            per-app Fly config with a health check
+.github/workflows/deploy.yml   changes → preview / teardown / staging / production
+deploykit.config.ts            source of truth for every decision
+```
+
+## Per-app `Dockerfile`
+
+A multi-stage build. For Turbo repos it uses `turbo prune` to produce a minimal, cache-friendly context containing only the target app and its internal dependencies; for Nx it uses the project graph. The runner stage is chosen from how the app is served:
+
+- **server** apps run a long-running process — by default your app's own `start` script (which resolves `node_modules/.bin` and honors the script), or an explicit exec-form command.
+- **static** apps serve their built output directory, optionally with SPA history fallback.
+
+If an app depends on a package that ships a **Prisma** schema, the Dockerfile runs `prisma generate` for it before the build.
+
+## Per-app `.dockerignore`
+
+Keeps the build context lean and cache-friendly.
+
+## Per-app `fly.toml`
+
+Includes an HTTP **health check** (`/` by default). Fly waits for it before shifting traffic to a new release and keeps the old machines running if it fails — so a bad deploy rolls itself back. Set `healthCheckPath` per app in `deploykit.config.ts` for an API that 404s at `/`.
+
+## `.github/workflows/deploy.yml`
+
+A single workflow that:
+
+- Detects which apps a change touches (via each app's watch paths — its own directory plus every internal dependency's directory).
+- On a **pull request**, deploys a **preview** app per changed app and comments its URL; on PR close, tears the preview down.
+- On **push to `main`**, deploys **staging**.
+- Deploys **production** behind a manual approval gate (a GitHub Environment protection rule).
+
+Secrets are wired through GitHub secrets → `flyctl secrets set` (runtime) and `flyctl deploy --build-arg` (build-time), by name only.
+
+## `deploykit.config.ts`
+
+The **single source of truth**. Every Dockerfile, `fly.toml` and workflow is regenerable from it, and you own it in your repo. Edit it and run `deploykit generate` to rebuild everything. See the **[Config Reference](/reference/config-reference)** for every field.
+
+```ts
+import { defineConfig } from "@alminabrulic/deploykit"
+
+export default defineConfig({
+  tool: "turbo",
+  packageManager: "pnpm",
+  nodeVersion: "20",
+  provider: { type: "fly", org: "my-org", region: "iad" },
+  apps: {
+    web: {
+      root: "apps/web",
+      packageName: "@acme/web",
+      framework: "next",
+      port: 3000,
+      internalDeps: ["@acme/ui"],
+      watchPaths: ["apps/web/**", "packages/ui/**"],
+      environments: {
+        preview: { name: "acme-web-pr-{pr}", trigger: "pr" },
+        staging: { name: "acme-web-staging", trigger: "push:main" },
+        production: { name: "acme-web-prod", trigger: "manual" },
+      },
+      secrets: ["DATABASE_URL"],
+    },
+  },
+})
+```

@@ -1,0 +1,41 @@
+---
+title: "How it works"
+summary: "Detection, the plan gate, and regeneration"
+description: "The mental model behind deploykit — how it detects your workspace, why nothing happens before you confirm the plan, and how the config file lets you regenerate every artifact."
+---
+
+## Detection
+
+deploykit's power comes from reading your workspace instead of asking you to describe it. During the **detect** phase it works out:
+
+- **Monorepo tool** — Turbo or Nx.
+- **Package manager** — pnpm, yarn, npm or bun.
+- **Deployable apps** — the workspace packages that are actually apps (not libraries).
+- **Framework per app** — Next, Remix, React Router, Astro, Vite, a plain Node server, or a static build. This is a *hint* that drives default ports and the runner shape.
+- **How each app is served** — a long-running `server` process, or `static` files.
+- **Port** — from the framework's convention, overridable.
+- **Internal dependencies** — which workspace packages each app imports. This determines the Docker prune context *and* the workflow's watch paths.
+- **Prisma schemas** — packages in an app's dependency closure that ship a `schema.prisma`.
+- **Env-var names** — runtime secrets and build-time variables the app references (names only, never values).
+
+Every answer in the **ask** phase is pre-filled from this, so most runs are a few keystrokes.
+
+## The plan gate
+
+deploykit is deliberately conservative: the **plan** phase shows you exactly what will be written and provisioned, and **nothing happens until you confirm**. Use `--dry-run` to print the plan and stop. This makes it safe to run in any repo just to see what it would do.
+
+## Regeneration
+
+The generated `deploykit.config.ts` is the **single source of truth**. Every Dockerfile, `fly.toml` and workflow is a pure function of it. That means:
+
+- You can hand-edit the config and run **[`deploykit generate`](/commands/generate)** to rebuild the artifacts.
+- Diffs are meaningful — a config change produces a predictable file change.
+- deploykit is removable — the config and generated files are yours; nothing depends on deploykit at deploy time.
+
+## What deploykit does *not* do
+
+- It does **not** run database migrations — see **[Database migrations](/guides/database-migrations)**.
+- It does **not** store secret values — only their names flow into the config and workflow.
+- It does **not** model database locality for multi-region — extra regions are for **stateless** apps.
+
+These are deliberate scope boundaries: each is a place where doing the convenient thing could cause irreversible damage or leak data.

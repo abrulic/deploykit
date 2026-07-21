@@ -1,0 +1,52 @@
+---
+title: "Health checks & automatic rollback"
+summary: "How a failing health check keeps a bad deploy from taking traffic"
+description: "Every generated fly.toml includes an HTTP health check. Fly waits for it before shifting traffic and keeps old machines running on failure, so a bad deploy rolls itself back. Configure the path per app."
+---
+
+## Two kinds of rollback
+
+deploykit gives you rollback protection at two levels:
+
+1. **Automatic, at deploy time** — a failing health check stops a bad release from ever taking traffic. This is built into every generated `fly.toml`.
+2. **Manual, after the fact** — a release that deployed cleanly but turned out bad can be reverted with **[`deploykit rollback`](/commands/rollback)**.
+
+This guide covers the first.
+
+## The health check
+
+Each generated `fly.toml` includes an HTTP health check — by default on `/`:
+
+- Fly **waits** for the check to pass before shifting traffic to the new release.
+- If it **fails**, Fly keeps the **old machines** running and serving.
+
+So a deploy that boots broken never takes production traffic — it rolls itself back to the previous release with no action from you.
+
+## Choosing the path
+
+The default (`/`) works for most web apps, which answer it with a 2xx/3xx. But an **API that 404s at `/`** would fail the check and wedge the deploy. Set a lightweight endpoint per app in `deploykit.config.ts`:
+
+```ts
+apps: {
+  api: {
+    // …
+    healthCheckPath: "/health",
+  },
+}
+```
+
+Then regenerate:
+
+```bash
+deploykit generate
+```
+
+## Picking a good endpoint
+
+- Make it **cheap** — no heavy DB work; it's polled frequently.
+- Make it **honest** — return non-2xx only when the app genuinely can't serve, so real failures are caught but transient dependency blips don't block every deploy.
+- Keep it **unauthenticated** (or trivially reachable) so Fly can hit it.
+
+## When a deploy still goes bad
+
+If a release passes its health check but is functionally wrong (bad logic, wrong config), the automatic guard won't catch it — that's what **[`deploykit rollback`](/commands/rollback)** is for.
