@@ -7,9 +7,11 @@ name: Claude Code Review
 #    don't burn a review.
 #  • Review behavior is tuned in REVIEW.md at the repo root, not here.
 #
-# Setup: add ANTHROPIC_API_KEY as a repository secret
-# (Settings → Secrets and variables → Actions) and install the Claude GitHub
-# App at https://github.com/apps/claude.
+# Setup: run `claude setup-token` (needs a Claude subscription) and store the
+# token it prints as the CLAUDE_CODE_OAUTH_TOKEN repository secret
+# (Settings → Secrets and variables → Actions), then install the Claude GitHub
+# App at https://github.com/apps/claude. To bill against API credits instead,
+# swap the input below for `anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}`.
 on:
   pull_request:
     types: [opened, synchronize]
@@ -41,7 +43,7 @@ jobs:
 
       - uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: >
             Review this pull request. First read REVIEW.md at the repo root and
             follow it as the source of truth for what to flag and how to rank
