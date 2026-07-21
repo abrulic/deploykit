@@ -15,6 +15,10 @@
       "types": "./dist/config.d.ts",
       "default": "./dist/config.js"
     },
+    "./generate": {
+      "types": "./dist/generate.d.ts",
+      "default": "./dist/generate.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

@@ -31,6 +31,7 @@ deploykit reads your workspace graph, figures out which apps are deployable, and
 - [Commands & flags](#commands--flags)
 - [What it generates](#what-it-generates)
 - [The config file](#the-config-file)
+- [Programmatic use](#programmatic-use)
 - [Environments](#environments)
 - [Secrets & environment variables](#secrets--environment-variables)
 - [Health checks & automatic rollback](#health-checks--automatic-rollback)
@@ -187,6 +188,37 @@ export default defineConfig({
 The full file — including the Prisma target, the `marketing` app, and the Cloudflare block — is at [`examples/deploykit.config.ts`](examples/deploykit.config.ts).
 
 The one rule is that every value must be **literal data**: strings, numbers, booleans, arrays, objects. Variables, imports, spreads and template placeholders are rejected (with the offending line) rather than guessed at. Everything else is fair game — quoted or bare keys, single or double quotes, `//` and `/* */` comments, trailing commas — so running Prettier, Biome, or your editor's formatter over the file is safe.
+
+## Programmatic use
+
+deploykit is a CLI first, but the pieces the CLI is built from are published too, so you can generate the same files from your own tooling. Two entry points, both ESM and fully typed:
+
+```ts
+import { defineConfig } from "@alminabrulic/deploykit";
+import {
+  planFiles,
+  writeFiles,
+  generateDockerfile,
+  generateFlyToml,
+  generateWorkflow,
+  generateSummary,
+  generateDockerignore,
+} from "@alminabrulic/deploykit/generate";
+
+const config = defineConfig({ /* ... */ });
+
+// Every file deploykit would write, each tagged new / identical / modified:
+const files = planFiles({ config, cwd: process.cwd() });
+files.forEach((f) => console.log(f.status, f.path));
+writeFiles({ files, cwd: process.cwd(), force: false });
+
+// Or just one artifact, as a string — no disk access at all:
+const dockerfile = generateDockerfile({ name: "web", app: config.apps.web, config });
+```
+
+The individual `generate*` functions are pure: config in, string out, no filesystem or network. `planFiles` reads the target directory only to classify each file against what's already there, and `writeFiles` is the only one that writes (skipping existing files unless `force`).
+
+Provisioning, deploys and the Fly/Cloudflare/GitHub clients are deliberately **not** exported — they shell out to `flyctl`/`gh` and are shaped around the CLI's flow rather than a stable API.
 
 ## Environments
 
