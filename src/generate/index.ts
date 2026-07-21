@@ -11,6 +11,21 @@ import { generateSummary } from "./summary.js";
 import { generateWorkflow } from "./workflow.js";
 
 /**
+ * This module is the published `@alminabrulic/deploykit/generate` entry, so
+ * everything exported here is public API — changing a signature is a breaking
+ * change. `planFiles`/`writeFiles` are the high-level pair (every file for a
+ * config, then write them); the individual generators are re-exported for
+ * callers that just want one artifact as a string, with no disk access at all.
+ */
+export { generateConfigFile } from "./configfile.js";
+export { generateDockerfile } from "./dockerfile.js";
+export { generateDockerignore } from "./dockerignore.js";
+export { generateFlyToml } from "./flytoml.js";
+export { generateSummary } from "./summary.js";
+export type { GenerateAppFileInput } from "./types.js";
+export { generateWorkflow } from "./workflow.js";
+
+/**
  * How a generated file compares to what's already on disk:
  * - `new`: nothing there yet.
  * - `identical`: the file matches what deploykit would generate (a no-op).

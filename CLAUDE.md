@@ -9,9 +9,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The package ships **two** tsup ESM builds ([tsup.config.ts](tsup.config.ts) exports an array):
 
 - `src/index.ts` → `dist/index.js` — the CLI (`bin`, shebang banner, owns `clean`).
-- `src/config.ts` → `dist/config.js` + `.d.ts` — the library entry behind `package.json` `exports`, because every generated `deploykit.config.ts` opens with `import { defineConfig } from "@alminabrulic/deploykit"`. Without it that import resolves to nothing and the user's config fails to typecheck — which is the entire reason the config is TypeScript instead of JSON.
+- `src/config.ts` → `dist/config.js` + `.d.ts` — the `.` entry, because every generated `deploykit.config.ts` opens with `import { defineConfig } from "@alminabrulic/deploykit"`. Without it that import resolves to nothing and the user's config fails to typecheck — which is the entire reason the config is TypeScript instead of JSON.
+- `src/generate/index.ts` → `dist/generate.js` + `.d.ts` — the `./generate` entry: `planFiles`/`writeFiles` plus the pure `generate*` functions, for callers building on top of deploykit.
 
-So [src/config.ts](src/config.ts) is **published public API**: anything exported there ships with types, and any import added to it lands in consumers' dependency graph. Keep it types + `defineConfig` + pure constants. After touching either build or the `exports` map, verify like a consumer, not just with `pnpm build`: `npm pack`, install the tarball in a temp project, then `node -e "import('@alminabrulic/deploykit')"` and `tsc` over a generated config.
+So [src/config.ts](src/config.ts) and [src/generate/index.ts](src/generate/index.ts) are **published public API**: anything exported there ships with types, a signature change is a breaking change, and any import added to them lands in consumers' dependency graph. Keep them pure — no `@clack/prompts`, no interactive stdio, no shelling out. The provider clients (`cloudflare`, `fly`, `provision`, `deploy`, `pr`) are deliberately *not* exported; they're shaped around the CLI's flow.
+
+After touching either build or the `exports` map, verify like a consumer, not just with `pnpm build`: `npm pack`, install the tarball in a temp project, then import both entries at runtime **and** run `tsc` over a file that uses them. A missing `exports` entry fails only at install-time for real users, never in this repo's own tests.
 
 ## Commands
 

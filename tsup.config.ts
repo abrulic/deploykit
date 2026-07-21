@@ -11,13 +11,22 @@ export default defineConfig([
     banner: { js: "#!/usr/bin/env node" },
   },
   {
-    // The library entry. Every generated `deploykit.config.ts` starts with
-    // `import { defineConfig } from "@alminabrulic/deploykit"` — without this
-    // build (and the matching "exports" in package.json) that import resolves
-    // to nothing, so the user's config fails to typecheck and can't be loaded
-    // by their own tooling. `dts` is what makes the config typed in an editor,
+    // The library entries, built together so their shared internals land in one
+    // chunk instead of being duplicated into each file.
+    //
+    // `config` is load-bearing, not a nicety: every generated
+    // `deploykit.config.ts` starts with `import { defineConfig } from
+    // "@alminabrulic/deploykit"`, and without this build (plus the matching
+    // "exports" in package.json) that import resolves to nothing — the user's
+    // config then fails to typecheck. `dts` is what types it in their editor,
     // which is the whole reason the config is TypeScript rather than JSON.
-    entry: ["src/config.ts"],
+    //
+    // `generate` exposes the pure generators for callers building on top of
+    // deploykit. Keep these entries pure: no prompts, no interactive stdio.
+    entry: {
+      config: "src/config.ts",
+      generate: "src/generate/index.ts",
+    },
     format: ["esm"],
     target: "node20",
     dts: true,
